@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CFG="${LOOPBACK_CONFIG_DIR:-$HOME/.config/loopback}"
+CONF="$CFG/config.env"
+LOG="$CFG/server.log"
+PID="$CFG/server.pid"
+VENV="$CFG/venv"
+TOKEN="$CFG/token"
+SERVER="$CFG/server.py"
+TUNNEL_PID="$CFG/tunnel.pid"
+
+[[ -f "$CONF" ]] || { echo "Loopback is not installed. Run ./install.sh"; exit 1; }
+# shellcheck disable=SC1090
+source "$CONF"
+
+lower(){ printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+die(){ printf '✗ %s\n' "$*" >&2; exit 1; }
+ok(){ printf '✓ %s\n' "$*"; }
+
+owned_server(){
+  local p="${1:-}"
+  [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null || return 1
+  local c
+  c="$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null || true)"
+  [[ "$c" == *"uvicorn server:app"* && "$c" == *"$CFG"* ]]
+}
+
+stop_server(){
+  if [[ -s "$PID" ]]; then
+    local p
+    p="$(cat "$PID" 2>/dev/null || true)"
+    if owned_server "$p"; then
+      kill "$p" 2>/dev/null || true
+      for _ in $(seq 1 40); do kill -0 "$p" 2>/dev/null || break; sleep .1; done
+    fi
+  fi
+  rm -f "$PID"
+}
+
+start_server(){
+  mkdir -p "$CFG"
+  printf '%s\n' "$LOOPBACK_PUBLIC_HOST" > "$CFG/public_host"
+  export LOOPBACK_LOCAL_PORT="$LOOPBACK_PORT"
+  export LOOPBACK_COMMAND_TIMEOUT="$LOOPBACK_TIMEOUT"
+  export LOOPBACK_MAX_OUTPUT_BYTES="$LOOPBACK_MAX_OUTPUT_BYTES"
+  export LOOPBACK_ACCESS_MODE="${LOOPBACK_ACCESS_MODE:-standard}"
+  : > "$LOG"
+  nohup "$VENV/bin/python" -m uvicorn server:app --app-dir "$CFG" \
+    --host 127.0.0.1 --port "$LOOPBACK_PORT" \
+    --proxy-headers --forwarded-allow-ips=127.0.0.1 \
+    --log-level info >"$LOG" 2>&1 &
+  echo $! > "$PID"
+  for _ in $(seq 1 $((LOOPBACK_STARTUP_TIMEOUT*4))); do
+    curl -fsS "http://127.0.0.1:$LOOPBACK_PORT/healthz" >/dev/null 2>&1 && return 0
+    sleep .25
+  done
+  tail -80 "$LOG" >&2 || true
+  die "server failed to start"
+}
+
+start_cloudflare(){
+  [[ -x "$(command -v cloudflared || true)" ]] || die "cloudflared is not installed"
+  [[ -n "${LOOPBACK_CLOUDFLARE_TUNNEL_ID:-}" ]] || die "Cloudflare tunnel is not configured"
+  local cf_log="$CFG/cloudflared.log"
+  nohup cloudflared tunnel --config "$CFG/cloudflared.yml" run "$LOOPBACK_CLOUDFLARE_TUNNEL_ID" >"$cf_log" 2>&1 &
+  echo $! > "$TUNNEL_PID"
+}
+
+stop_cloudflare(){
+  [[ -s "$TUNNEL_PID" ]] || return 0
+  local p
+  p="$(cat "$TUNNEL_PID" 2>/dev/null || true)"
+  [[ -n "$p" ]] && kill "$p" 2>/dev/null || true
+  rm -f "$TUNNEL_PID"
+}
+
+start_tailscale(){
+  command -v tailscale >/dev/null 2>&1 || die "tailscale is not installed"
+  tailscale funnel --bg --https="${LOOPBACK_TAILSCALE_HTTPS_PORT:-443}" "http://127.0.0.1:$LOOPBACK_PORT" >/dev/null
+}
+
+stop_tailscale(){
+  command -v tailscale >/dev/null 2>&1 || return 0
+  tailscale funnel reset >/dev/null 2>&1 || true
+}
+
+start_ingress(){
+  case "$(lower "${LOOPBACK_INGRESS:-local}")" in
+    cloudflare) start_cloudflare ;;
+    tailscale) start_tailscale ;;
+    local|none) ;;
+    *) die "unknown ingress: $LOOPBACK_INGRESS" ;;
+  esac
+}
+
+stop_ingress(){
+  case "$(lower "${LOOPBACK_INGRESS:-local}")" in
+    cloudflare) stop_cloudflare ;;
+    tailscale) stop_tailscale ;;
+    local|none) ;;
+  esac
+}
+
+up(){
+  stop_server
+  start_server
+  start_ingress
+  ok "Loopback is up"
+  printf '  local:  http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
+  if [[ "${LOOPBACK_INGRESS:-local}" != "local" ]]; then
+    printf '  public: https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
+  fi
+}
+
+down(){
+  stop_ingress
+  stop_server
+  ok "Loopback is down"
+}
+
+restart(){ down || true; up; }
+
+status(){
+  local state=DOWN p=""
+  [[ -s "$PID" ]] && p="$(cat "$PID" 2>/dev/null || true)"
+  owned_server "$p" && state=UP || true
+  printf 'loopback: %s%s\n' "$state" "${p:+ (PID $p)}"
+  printf '  profile: %s\n' "${LOOPBACK_ACCESS_MODE:-standard}"
+  printf '  ingress: %s\n' "${LOOPBACK_INGRESS:-local}"
+  printf '  local:   http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
+  [[ "${LOOPBACK_INGRESS:-local}" == "local" ]] || printf '  public:  https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
+  printf '  timeout: %ss\n' "$LOOPBACK_TIMEOUT"
+  printf '  maxout:  %s bytes\n' "$LOOPBACK_MAX_OUTPUT_BYTES"
+}
+
+doctor(){
+  echo "== Loopback doctor =="
+  [[ -x "$VENV/bin/python" ]] && ok "python venv" || echo "✗ python venv"
+  [[ -f "$SERVER" ]] && ok "server runtime" || echo "✗ server runtime"
+  [[ -s "$TOKEN" ]] && ok "auth token" || echo "✗ auth token"
+  command -v git >/dev/null 2>&1 && ok "git" || echo "• git not found"
+  case "$(lower "${LOOPBACK_INGRESS:-local}")" in
+    cloudflare) command -v cloudflared >/dev/null 2>&1 && ok "cloudflared" || echo "✗ cloudflared" ;;
+    tailscale) command -v tailscale >/dev/null 2>&1 && ok "tailscale" || echo "✗ tailscale" ;;
+  esac
+  curl -fsS "http://127.0.0.1:$LOOPBACK_PORT/healthz" >/dev/null 2>&1 && ok "local health" || echo "✗ local health"
+  [[ "${LOOPBACK_INGRESS:-local}" == "local" ]] || {
+    curl -fsS --max-time 15 "https://$LOOPBACK_PUBLIC_HOST/healthz" >/dev/null 2>&1 && ok "public health" || echo "✗ public health"
+  }
+}
+
+logs(){
+  if [[ "${1:-}" == "-f" || "${1:-}" == "--follow" ]]; then exec tail -f "$LOG"; fi
+  tail -n "${1:-100}" "$LOG" 2>/dev/null || true
+}
+
+url(){
+  if [[ "${LOOPBACK_INGRESS:-local}" == "local" ]]; then
+    printf 'http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
+  else
+    printf 'https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
+  fi
+}
+
+token(){ cat "$TOKEN"; echo; }
+
+rotate_token(){
+  umask 077
+  python3 - <<'PY' > "$TOKEN"
+import secrets
+print(secrets.token_hex(32))
+PY
+  chmod 600 "$TOKEN"
+  restart
+  ok "token rotated"
+}
+
+config(){
+  local action="$(lower "${1:-list}")"
+  shift || true
+  case "$action" in
+    list) cat "$CONF" ;;
+    get) grep -E "^${1:?key}=" "$CONF" || true ;;
+    set)
+      local key="${1:?key}" value="${2:?value}"
+      python3 - "$CONF" "$key" "$value" <<'PY'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]); k=sys.argv[2]; v=sys.argv[3]
+lines=p.read_text().splitlines()
+out=[]; done=False
+for line in lines:
+    if line.startswith(k+"="):
+        out.append(k+"="+v); done=True
+    else:
+        out.append(line)
+if not done: out.append(k+"="+v)
+p.write_text("\n".join(out)+"\n")
+PY
+      ok "saved $key"
+      ;;
+    *) die "Config List|Get KEY|Set KEY VALUE" ;;
+  esac
+}
+
+help(){
+cat <<'EOF'
+LOOPBACK
+
+  loopback up
+  loopback down
+  loopback restart
+  loopback status
+  loopback doctor
+  loopback logs [N|-f]
+  loopback url
+  loopback token
+  loopback rotate-token
+  loopback config list|get|set
+  loopback help
+
+Runtime MCP tools in the standard installer:
+  read_file, write_file, list_dir, patch_file, search_text,
+  tail_file, git_info, diagnostics, machine_info
+
+The development machine may enable additional locally managed trusted tools.
+EOF
+}
+
+cmd="$(lower "${1:-help}")"; shift || true
+case "$cmd" in
+  up) up "$@" ;;
+  down) down "$@" ;;
+  restart) restart "$@" ;;
+  status) status "$@" ;;
+  doctor) doctor "$@" ;;
+  logs) logs "$@" ;;
+  url) url ;;
+  token) token ;;
+  rotate-token|rotatetoken) rotate_token ;;
+  config) config "$@" ;;
+  help|-h|--help) help ;;
+  *) die "unknown command: $cmd" ;;
+esac
