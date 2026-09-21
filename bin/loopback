@@ -61,9 +61,14 @@ start_server(){
 
 start_cloudflare(){
   [[ -x "$(command -v cloudflared || true)" ]] || die "cloudflared is not installed"
-  [[ -n "${LOOPBACK_CLOUDFLARE_TUNNEL_ID:-}" ]] || die "Cloudflare tunnel is not configured"
   local cf_log="$CFG/cloudflared.log"
-  nohup cloudflared tunnel --config "$CFG/cloudflared.yml" run "$LOOPBACK_CLOUDFLARE_TUNNEL_ID" >"$cf_log" 2>&1 &
+  if [[ -n "${LOOPBACK_CLOUDFLARE_TOKEN_FILE:-}" && -s "$LOOPBACK_CLOUDFLARE_TOKEN_FILE" ]]; then
+    nohup cloudflared tunnel run --token-file "$LOOPBACK_CLOUDFLARE_TOKEN_FILE" >"$cf_log" 2>&1 &
+  else
+    [[ -n "${LOOPBACK_CLOUDFLARE_TUNNEL_ID:-}" ]] || die "Cloudflare tunnel is not configured"
+    [[ -s "$CFG/cloudflared.yml" ]] || die "Cloudflare local tunnel config is missing"
+    nohup cloudflared tunnel --config "$CFG/cloudflared.yml" run "$LOOPBACK_CLOUDFLARE_TUNNEL_ID" >"$cf_log" 2>&1 &
+  fi
   echo $! > "$TUNNEL_PID"
 }
 

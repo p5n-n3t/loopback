@@ -35,6 +35,8 @@ NONINTERACTIVE=0
 INGRESS=""
 HOSTNAME_VALUE=""
 PORT=2026
+CLOUDFLARE_TOKEN_FILE=""
+CLOUDFLARE_TUNNEL_ID_ARG=""
 
 while (($#)); do
   case "$1" in
@@ -42,8 +44,10 @@ while (($#)); do
     --ingress) INGRESS="${2:?cloudflare|tailscale|local}"; shift 2 ;;
     --host) HOSTNAME_VALUE="${2:?hostname required}"; shift 2 ;;
     --port) PORT="${2:?port required}"; shift 2 ;;
+    --cloudflare-token-file) CLOUDFLARE_TOKEN_FILE="${2:?token file required}"; shift 2 ;;
+    --cloudflare-tunnel-id) CLOUDFLARE_TUNNEL_ID_ARG="${2:?tunnel id required}"; shift 2 ;;
     -h|--help)
-      echo "Usage: ./install.sh [--non-interactive --ingress cloudflare|tailscale|local --host FQDN] [--port 2026]"
+      echo "Usage: ./install.sh [--non-interactive --ingress cloudflare|tailscale|local --host FQDN] [--port 2026] [--cloudflare-token-file PATH --cloudflare-tunnel-id UUID]"
       exit 0
       ;;
     *) die "unknown installer option: $1" ;;
@@ -144,26 +148,35 @@ CLOUDFLARE_TUNNEL_ID=""
 case "$INGRESS" in
   cloudflare)
     install_cloudflared
-    echo
-    printf "${CYAN}Cloudflare authentication${RESET}\n"
-    cloudflared tunnel login
+    if [[ -n "$CLOUDFLARE_TOKEN_FILE" ]]; then
+      [[ -s "$CLOUDFLARE_TOKEN_FILE" ]] || die "Cloudflare token file does not exist or is empty"
+      [[ -n "$CLOUDFLARE_TUNNEL_ID_ARG" ]] || die "--cloudflare-tunnel-id is required with --cloudflare-token-file"
+      [[ -n "$HOSTNAME_VALUE" ]] || die "--host is required with --cloudflare-token-file"
+      [[ "$HOSTNAME_VALUE" == *.* ]] || die "A full hostname is required"
+      install -m 600 "$CLOUDFLARE_TOKEN_FILE" "$CFG/cloudflared.token"
+      CLOUDFLARE_TUNNEL_ID="$CLOUDFLARE_TUNNEL_ID_ARG"
+      PUBLIC_HOST="$HOSTNAME_VALUE"
+    else
+      echo
+      printf "${CYAN}Cloudflare authentication${RESET}\n"
+      cloudflared tunnel login
 
-    if [[ -z "$HOSTNAME_VALUE" ]]; then
-      printf "Public hostname (example: loopback.example.com): "
-      read -r HOSTNAME_VALUE
-    fi
-    [[ "$HOSTNAME_VALUE" == *.* ]] || die "A full hostname is required"
+      if [[ -z "$HOSTNAME_VALUE" ]]; then
+        printf "Public hostname (example: loopback.example.com): "
+        read -r HOSTNAME_VALUE
+      fi
+      [[ "$HOSTNAME_VALUE" == *.* ]] || die "A full hostname is required"
 
-    TUNNEL_NAME="loopback-$(hostname | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9.-')"
-    cloudflared tunnel create "$TUNNEL_NAME" || true
+      TUNNEL_NAME="loopback-$(hostname | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9.-')"
+      cloudflared tunnel create "$TUNNEL_NAME" || true
 
-    CLOUDFLARE_TUNNEL_ID="$(cloudflared tunnel list --output json | python3 -c 'import json,sys; n=sys.argv[1]; a=json.load(sys.stdin); print(next((x["id"] for x in a if x.get("name")==n), ""))' "$TUNNEL_NAME")"
-    [[ -n "$CLOUDFLARE_TUNNEL_ID" ]] || die "Could not resolve Cloudflare tunnel ID"
+      CLOUDFLARE_TUNNEL_ID="$(cloudflared tunnel list --output json | python3 -c 'import json,sys; n=sys.argv[1]; a=json.load(sys.stdin); print(next((x["id"] for x in a if x.get("name")==n), ""))' "$TUNNEL_NAME")"
+      [[ -n "$CLOUDFLARE_TUNNEL_ID" ]] || die "Could not resolve Cloudflare tunnel ID"
 
-    CRED="$HOME/.cloudflared/$CLOUDFLARE_TUNNEL_ID.json"
-    [[ -f "$CRED" ]] || die "Cloudflare tunnel credentials were not created"
+      CRED="$HOME/.cloudflared/$CLOUDFLARE_TUNNEL_ID.json"
+      [[ -f "$CRED" ]] || die "Cloudflare tunnel credentials were not created"
 
-    cat > "$CFG/cloudflared.yml" <<EOF
+      cat > "$CFG/cloudflared.yml" <<EOF
 tunnel: $CLOUDFLARE_TUNNEL_ID
 credentials-file: $CRED
 ingress:
@@ -171,8 +184,9 @@ ingress:
     service: http://127.0.0.1:$PORT
   - service: http_status:404
 EOF
-    cloudflared tunnel route dns "$CLOUDFLARE_TUNNEL_ID" "$HOSTNAME_VALUE"
-    PUBLIC_HOST="$HOSTNAME_VALUE"
+      cloudflared tunnel route dns "$CLOUDFLARE_TUNNEL_ID" "$HOSTNAME_VALUE"
+      PUBLIC_HOST="$HOSTNAME_VALUE"
+    fi
     ;;
 
   tailscale)
@@ -198,6 +212,7 @@ LOOPBACK_STARTUP_TIMEOUT=15
 LOOPBACK_ACCESS_MODE=standard
 LOOPBACK_INGRESS=$INGRESS
 LOOPBACK_CLOUDFLARE_TUNNEL_ID=$CLOUDFLARE_TUNNEL_ID
+LOOPBACK_CLOUDFLARE_TOKEN_FILE=$CFG/cloudflared.token
 LOOPBACK_TAILSCALE_HTTPS_PORT=443
 EOF
 chmod 600 "$CFG/config.env"
