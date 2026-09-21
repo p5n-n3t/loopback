@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import html as html_lib
 import os
 import secrets
 import socket
@@ -416,7 +417,7 @@ async def oauth_authorize(request: Request) -> Response:
 
     if not supplied_token:
         hidden = "".join(
-            f'<input type="hidden" name="{k}" value="{v}">'
+            f'<input type="hidden" name="{html_lib.escape(k, quote=True)}" value="{html_lib.escape(v, quote=True)}">'
             for k, v in [
                 ("client_id", client_id),
                 ("redirect_uri", redirect_uri),
@@ -425,19 +426,68 @@ async def oauth_authorize(request: Request) -> Response:
                 ("code_challenge_method", code_challenge_method),
             ]
         )
-        html = f"""<!doctype html><html><body style="font-family:sans-serif;max-width:420px;margin:80px auto">
-<h3>Authorize loopback access</h3>
-<p>Enter your existing loopback token (<code>loopback token</code>) to grant this client access.</p>
-<form method="get" action="/oauth/authorize">
-{hidden}
-<label>Loopback token</label><br>
-<input type="password" name="loopback_token" style="width:100%" autofocus><br><br>
-<button type="submit">Approve</button>
-</form></body></html>"""
-        return HTMLResponse(html)
+        safe_host = html_lib.escape(PUBLIC_HOST, quote=True)
+        safe_client = html_lib.escape(client_id or "dynamic client", quote=True)
+        html = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Loopback // OAuth</title>
+<style>
+:root{{--ink:#090b0d;--panel:#11151a;--line:#2a3138;--yellow:#ffd600;--cyan:#6ee7ff;--muted:#91a0ad;--text:#f5f7f8}}
+*{{box-sizing:border-box}} body{{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#1b2229 0,#0b0e11 45%,#050607 100%);color:var(--text);font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;padding:24px}}
+.card{{width:min(560px,100%);background:linear-gradient(180deg,#12171c,#0d1115);border:1px solid #2b333a;border-radius:22px;box-shadow:0 28px 90px #000a,0 0 0 1px #ffd60012;overflow:hidden}}
+.top{{padding:28px 30px 22px;border-bottom:1px solid var(--line);position:relative}}
+.badge{{display:inline-flex;gap:9px;align-items:center;color:var(--yellow);font-size:12px;letter-spacing:.18em;text-transform:uppercase}}
+.logo{{width:94px;height:58px;display:block;margin:18px 0 8px}}
+h1{{font-size:27px;margin:8px 0 8px;letter-spacing:-.04em}} .sub{{color:var(--muted);font-size:13px;line-height:1.65;margin:0}}
+.meta{{display:grid;grid-template-columns:90px 1fr;gap:8px 14px;margin-top:18px;padding:13px 15px;border:1px solid var(--line);border-radius:12px;background:#080b0e;font-size:12px}}
+.meta b{{color:var(--cyan);font-weight:500}} .meta span{{overflow-wrap:anywhere;color:#c8d0d6}}
+.body{{padding:25px 30px 30px}} label{{display:block;color:#e7ecef;font-size:12px;margin:0 0 9px;letter-spacing:.08em;text-transform:uppercase}}
+input{{width:100%;border:1px solid #38424b;background:#07090b;color:#fff;border-radius:11px;padding:14px 15px;font:inherit;outline:none;transition:.15s}} input:focus{{border-color:var(--yellow);box-shadow:0 0 0 3px #ffd6001f}}
+.hint{{font-size:11px;color:var(--muted);margin:9px 2px 18px;line-height:1.55}} code{{color:var(--cyan)}}
+button{{width:100%;border:0;border-radius:11px;padding:14px 16px;background:var(--yellow);color:#090909;font:700 13px inherit;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;box-shadow:0 8px 28px #ffd6001f}} button:hover{{filter:brightness(1.06)}}
+.foot{{margin-top:16px;color:#66737e;font-size:10px;text-align:center}}
+</style>
+</head>
+<body>
+<main class="card">
+  <section class="top">
+    <div class="badge"><span>◆</span> LOOPBACK AUTH GATE</div>
+    <svg class="logo" viewBox="0 0 300 160" aria-label="Loopback infinity logo">
+      <path d="M28 80C28 25 78 25 150 80s122 55 122 0S222 25 150 80 28 135 28 80" fill="none" stroke="#050505" stroke-width="36" stroke-linecap="round"/>
+      <path d="M28 80C28 25 78 25 150 80s122 55 122 0S222 25 150 80 28 135 28 80" fill="none" stroke="#ffd600" stroke-width="22" stroke-linecap="round"/>
+    </svg>
+    <h1>Authorize machine access</h1>
+    <p class="sub">A web agent is requesting an authenticated MCP session. Supply this machine's Loopback token to continue.</p>
+    <div class="meta"><b>HOST</b><span>{safe_host}</span><b>CLIENT</b><span>{safe_client}</span></div>
+  </section>
+  <section class="body">
+    <form method="get" action="/oauth/authorize" autocomplete="off">
+      {hidden}
+      <label for="loopback_token">Loopback token</label>
+      <input id="loopback_token" type="password" name="loopback_token" spellcheck="false" autocomplete="current-password" autofocus required>
+      <p class="hint">On the target machine, retrieve it with <code>loopback token</code>. The token is exchanged through OAuth and is not displayed back to the client.</p>
+      <button type="submit">Authorize connector</button>
+    </form>
+    <div class="foot">MCP // OAuth 2.0 + PKCE // {safe_host}</div>
+  </section>
+</main>
+</body>
+</html>"""
+        return HTMLResponse(html, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
     if not secrets.compare_digest(supplied_token, TOKEN):
-        return HTMLResponse("<h3>Invalid token</h3>", status_code=401)
+        return HTMLResponse(
+            "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<body style='margin:0;min-height:100vh;display:grid;place-items:center;background:#07090b;color:#f5f7f8;font:14px monospace'>"
+            "<div style='max-width:520px;padding:28px;border:1px solid #343b42;border-radius:16px;background:#101419'>"
+            "<b style='color:#ffd600'>LOOPBACK // ACCESS DENIED</b><p>The supplied token is invalid.</p>"
+            "<p style='color:#91a0ad'>Return to the connector flow and use the token from <code style='color:#6ee7ff'>loopback token</code>.</p></div></body>",
+            status_code=401,
+            headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        )
 
     code = secrets.token_urlsafe(24)
     _OAUTH_CODES[code] = {
