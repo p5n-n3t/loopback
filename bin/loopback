@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+export PATH="$HOME/.local/bin:$PATH"
+
 CFG="${LOOPBACK_CONFIG_DIR:-$HOME/.config/loopback}"
 CONF="$CFG/config.env"
 LOG="$CFG/server.log"
