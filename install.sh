@@ -39,6 +39,7 @@ HOSTNAME_VALUE=""
 PORT=2026
 CLOUDFLARE_TOKEN_FILE=""
 CLOUDFLARE_TUNNEL_ID_ARG=""
+AUTOSTART=1
 
 while (($#)); do
   case "$1" in
@@ -48,6 +49,7 @@ while (($#)); do
     --port) PORT="${2:?port required}"; shift 2 ;;
     --cloudflare-token-file) CLOUDFLARE_TOKEN_FILE="${2:?token file required}"; shift 2 ;;
     --cloudflare-tunnel-id) CLOUDFLARE_TUNNEL_ID_ARG="${2:?tunnel id required}"; shift 2 ;;
+    --no-autostart) AUTOSTART=0; shift ;;
     -h|--help)
       echo "Usage: ./install.sh [--non-interactive --ingress cloudflare|tailscale|local --host FQDN] [--port 2026] [--cloudflare-token-file PATH --cloudflare-tunnel-id UUID]"
       exit 0
@@ -221,7 +223,11 @@ chmod 600 "$CFG/config.env"
 printf '%s\n' "$PUBLIC_HOST" > "$CFG/public_host"
 
 echo
-"$CLI" up
+if [[ "$AUTOSTART" == 1 ]] && command -v systemctl >/dev/null 2>&1; then
+  "$CLI" autostart on
+else
+  "$CLI" up
+fi
 
 echo
 printf "${YELLOW}${BOLD}Installed.${RESET}\n"

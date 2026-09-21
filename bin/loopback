@@ -211,6 +211,59 @@ PY
   esac
 }
 
+
+autostart(){
+  local action="$(lower "${1:-status}")"
+  local unit_dir="$HOME/.config/systemd/user"
+  local unit="$unit_dir/loopback.service"
+  case "$action" in
+    on|enable)
+      mkdir -p "$unit_dir"
+      cat > "$unit" <<EOF
+[Unit]
+Description=Loopback MCP bridge
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/loopback up
+ExecStop=%h/.local/bin/loopback down
+TimeoutStartSec=180
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
+EOF
+      systemctl --user daemon-reload
+      systemctl --user enable --now loopback.service
+      if command -v loginctl >/dev/null 2>&1; then
+        if sudo -n true >/dev/null 2>&1; then
+          sudo loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
+        fi
+      fi
+      ok "autostart enabled"
+      ;;
+    off|disable)
+      systemctl --user disable --now loopback.service 2>/dev/null || true
+      rm -f "$unit"
+      systemctl --user daemon-reload 2>/dev/null || true
+      ok "autostart disabled"
+      ;;
+    status)
+      if systemctl --user is-enabled --quiet loopback.service 2>/dev/null; then
+        echo "autostart: enabled"
+      else
+        echo "autostart: disabled"
+      fi
+      systemctl --user status loopback.service --no-pager 2>/dev/null || true
+      ;;
+    *) die "autostart on|off|status" ;;
+  esac
+}
+
 help(){
 cat <<'EOF'
 LOOPBACK
@@ -225,6 +278,7 @@ LOOPBACK
   loopback token
   loopback rotate-token
   loopback config list|get|set
+  loopback autostart on|off|status
   loopback help
 
 Runtime MCP tools in the standard installer:
@@ -247,6 +301,7 @@ case "$cmd" in
   token) token ;;
   rotate-token|rotatetoken) rotate_token ;;
   config) config "$@" ;;
+  autostart) autostart "$@" ;;
   help|-h|--help) help ;;
   *) die "unknown command: $cmd" ;;
 esac

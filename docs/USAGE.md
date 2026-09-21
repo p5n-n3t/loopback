@@ -10,6 +10,22 @@
 
 `loopback status` reports profile, ingress, endpoint, timeout, and output limits.
 
+## Boot persistence
+
+Fresh installs enable user-systemd autostart when systemd is available.
+
+Manage it with:
+
+```bash
+loopback autostart on
+loopback autostart off
+loopback autostart status
+```
+
+On Linux, Loopback also enables user lingering when passwordless sudo is available so the user service can start at boot without an interactive login.
+
+Pass `--no-autostart` to `install.sh` if you want a session-only installation.
+
 ## Diagnostics
 
 Run:
