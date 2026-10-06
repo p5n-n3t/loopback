@@ -263,6 +263,21 @@ PY
   esac
 }
 
+plugin(){
+  local action="$(lower "${1:-package}")"; shift || true
+  case "$action" in
+    package)
+      local output="${1:-$PWD/loopback-plugin.zip}"
+      local endpoint
+      endpoint="$(url)"
+      [[ "$endpoint" == https://* ]] || die "plugin packages require a public HTTPS Loopback endpoint; current endpoint is $endpoint"
+      "$VENV/bin/python" "$CFG/plugin_packager.py" --mcp-url "$endpoint" --output "$output"
+      ok "plugin package written to $output"
+      ;;
+    *) die "plugin package [OUTPUT.zip]" ;;
+  esac
+}
+
 node(){
   local action="$(lower "${1:-list}")"; shift || true
   case "$action" in
@@ -373,6 +388,9 @@ Policy
   loopback policy profile read-only|standard|trusted
   loopback policy tool NAME on|off
 
+Plugin
+  loopback plugin package [OUTPUT.zip]
+
 Fleet
   loopback node list
   loopback node add NAME SSH_TARGET
@@ -411,6 +429,7 @@ case "$cmd" in
   config) config "$@" ;;
   policy) policy "$@" ;;
   node|nodes) node "$@" ;;
+  plugin) plugin "$@" ;;
   autostart) autostart "$@" ;;
   help|-h|--help) help ;;
   *) die "unknown command: $cmd" ;;
