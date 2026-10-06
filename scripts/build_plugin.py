@@ -36,7 +36,9 @@ PLUGIN_JSON = {
                     "Run commands and background jobs",
                     "Manage persistent terminal sessions",
                     "Inspect processes and system health",
-                    "Route work to registered Loopback nodes"
+                    "Route work to registered Loopback nodes",
+                    "Work with DOCX, XLSX, and PDF files",
+                    "Use optional structured browser automation"
                 ],
                 "defaultPrompt": [
                     "Use Loopback to inspect the connected machine and help me complete this task.",
@@ -51,7 +53,7 @@ PLUGIN_JSON = {
 
 SKILL = """---
 name: loopback
-description: Operate an authorized computer or server through the Loopback MCP server. Use for filesystem, Git, shell, process, background-job, persistent-terminal, diagnostics, policy, and registered-node tasks.
+description: Operate an authorized computer or server through the Loopback MCP server. Use for filesystem, Git, shell, process, background-job, persistent-terminal, diagnostics, document, optional browser, policy, and registered-node tasks.
 ---
 
 # Loopback
@@ -69,6 +71,8 @@ connected through Loopback.
   non-interactive work, and persistent terminals when state or interaction must
   survive across multiple calls.
 - Treat process signaling and shell execution as side-effecting.
+- Use structured document tools instead of shelling out when they fit the file.
+- Use browser automation only when the capability is enabled and the task requires web interaction.
 - Never expose credentials, tokens, private keys, recovery codes, or unrelated
   secrets in user-visible output.
 
