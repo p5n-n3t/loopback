@@ -394,6 +394,7 @@ Runtime MCP tools:
   System: process_list, process_kill, git_info, diagnostics, machine_info
   Documents: docx_text/replace, xlsx_read/write_range, pdf_text/merge/extract_pages
   Browser: browser_status/open/snapshot/click/fill/get_url/close (optional)
+  Desktop: desktop_status/windows/screenshot/activate_window/click/type/key (optional Linux/X11)
   Policy/Fleet: policy_status, node_list/call/read_file/execute/diagnostics
 
 The development machine may enable additional locally managed trusted tools.

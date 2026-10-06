@@ -14,6 +14,7 @@ sys.path.insert(0, str(RUNTIME))
 from audit import AuditStore
 from browser import BrowserAdapter
 from documents import DocumentTools
+from desktop import DesktopAdapter
 from dashboard import render_dashboard, render_login
 from fleet import FleetStore
 from jobs import JobManager, TerminalManager
@@ -77,6 +78,12 @@ class PolicyTests(unittest.TestCase):
             self.policy.check_browser()
         self.policy.save({"allow_browser": True})
         self.policy.check_browser()
+
+    def test_desktop_disabled_by_default(self):
+        with self.assertRaises(PolicyError):
+            self.policy.check_desktop()
+        self.policy.save({"allow_desktop": True})
+        self.policy.check_desktop()
 
 
 class AuditTests(unittest.TestCase):
@@ -192,6 +199,13 @@ class BrowserAdapterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             browser.open("http://example.com")
 
+
+class DesktopAdapterTests(unittest.TestCase):
+    def test_status_shape(self):
+        status = DesktopAdapter().status()
+        self.assertIn("available", status)
+        self.assertIn("platform", status)
+        self.assertIn("xdotool", status)
 
 class DashboardTests(unittest.TestCase):
     def test_render(self):

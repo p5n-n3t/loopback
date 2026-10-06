@@ -94,6 +94,13 @@ class ServerImportTests(unittest.TestCase):
             "pdf_text",
             "pdf_merge",
             "pdf_extract_pages",
+            "desktop_status",
+            "desktop_windows",
+            "desktop_screenshot",
+            "desktop_activate_window",
+            "desktop_click",
+            "desktop_type",
+            "desktop_key",
         }
         # MCPServer exposes registered tools through its internal tool manager.
         manager = getattr(self.server.mcp, "_tool_manager", None)

@@ -54,7 +54,7 @@ button,select,input,textarea{{font:inherit;border-radius:8px;border:1px solid #3
   <div class="card wide" style="grid-column:span 6"><div class="label">Allowed tools · * or one per line</div><textarea id="allowedTools"></textarea></div>
   <div class="card wide" style="grid-column:span 6"><div class="label">Denied tools · one per line</div><textarea id="deniedTools"></textarea></div>
 </div>
-<div class="row" style="margin-top:10px"><label><input id="allowBrowser" type="checkbox"> enable optional browser automation</label><button class="primary" onclick="saveBoundaries()">Save boundaries</button></div>
+<div class="row" style="margin-top:10px"><label><input id="allowBrowser" type="checkbox"> enable optional browser automation</label><label><input id="allowDesktop" type="checkbox"> enable native desktop automation</label><button class="primary" onclick="saveBoundaries()">Save boundaries</button></div>
 </section>
 
 <section class="card wide"><h2>Nodes</h2><div class="row"><input id="nodeName" placeholder="name"><input id="nodeUrl" class="grow" placeholder="https://host.example/mcp"><input id="nodeToken" type="password" placeholder="bearer token"><button onclick="addNode()">Add</button></div><div id="nodes"></div></section>
@@ -79,7 +79,8 @@ async function refresh(){{
   allowedTools.value=(d.policy.allowed_tools||['*']).join('\n');
   deniedTools.value=(d.policy.denied_tools||[]).join('\n');
   allowBrowser.checked=!!d.policy.allow_browser;
-  capabilities.textContent='browser adapter: '+(d.browser.available?'available':'not installed')+' / '+(d.policy.allow_browser?'enabled':'disabled')+'\ndocument tools: DOCX / XLSX / PDF';
+  allowDesktop.checked=!!d.policy.allow_desktop;
+  capabilities.textContent='browser adapter: '+(d.browser.available?'available':'not installed')+' / '+(d.policy.allow_browser?'enabled':'disabled')+'\nnative desktop: '+(d.desktop.available?'available':'unavailable')+' / '+(d.policy.allow_desktop?'enabled':'disabled')+'\ndocument tools: DOCX / XLSX / PDF';
   jobs.textContent=d.jobs.filter(x=>x.running).length; terms.textContent=d.terminals.filter(x=>x.alive).length; approvals.textContent=d.approvals.length;
   calls.textContent=d.audit.total; failures.textContent=d.audit.failures;
   system.textContent='load: '+d.system.load.join('  ')+'\nmemory: '+d.system.memory_used_human+' / '+d.system.memory_total_human+'\ndisk: '+d.system.disk_used_human+' / '+d.system.disk_total_human+'\npython: '+d.system.python;
@@ -97,7 +98,7 @@ async function saveBoundaries(){{
  await j('/api/admin/policy',{{method:'POST',body:JSON.stringify({{
    allowed_roots:lines(allowedRoots.value),denied_roots:lines(deniedRoots.value),
    allowed_tools:lines(allowedTools.value),denied_tools:lines(deniedTools.value),
-   allow_browser:allowBrowser.checked
+   allow_browser:allowBrowser.checked,allow_desktop:allowDesktop.checked
  }})}});
  refresh();
 }}

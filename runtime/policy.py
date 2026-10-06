@@ -26,6 +26,7 @@ DEFAULT_POLICY: dict[str, Any] = {
     "allow_process_control": True,
     "allow_fleet": True,
     "allow_browser": False,
+    "allow_desktop": False,
     "allowed_tools": ["*"],
     "denied_tools": [],
     "require_approval_patterns": [
@@ -253,6 +254,10 @@ class PolicyStore:
     def check_browser(self) -> None:
         if self.profile in {"locked", "read-only"} or not bool(self.data.get("allow_browser", False)):
             raise PolicyError("browser automation is disabled by policy")
+
+    def check_desktop(self) -> None:
+        if self.profile in {"locked", "read-only"} or not bool(self.data.get("allow_desktop", False)):
+            raise PolicyError("native desktop automation is disabled by policy")
 
     def check_process_control(self) -> None:
         if self.profile in {"locked", "read-only"} or not bool(self.data.get("allow_process_control", True)):
