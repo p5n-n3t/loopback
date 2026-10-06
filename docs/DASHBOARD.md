@@ -36,6 +36,7 @@ The dashboard shows:
 - current policy profile
 - allowed/denied filesystem roots and tool lists
 - optional browser-adapter availability/state
+- optional native-desktop availability/state
 - active background jobs
 - active persistent terminals
 - pending Loopback approval requests
@@ -48,6 +49,7 @@ It can:
 - switch between standard, trusted, read-only, and locked profiles
 - edit allowed/denied roots and allowed/denied MCP tools
 - explicitly enable or disable optional browser automation
+- explicitly enable or disable native desktop automation
 - approve a sensitive Loopback action once or for a bounded number of uses/time
 - stop Loopback background jobs
 - close Loopback PTY sessions
