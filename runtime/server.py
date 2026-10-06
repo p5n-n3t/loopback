@@ -5,6 +5,7 @@ import base64
 import hashlib
 import html as html_lib
 import json
+import urllib.parse
 import os
 import secrets
 import shutil
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import jwt
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.server import MCPServer
@@ -596,44 +598,102 @@ async def node_call(node: str, tool: str, arguments: dict[str, Any] | None = Non
 
 
 # ---------------------------------------------------------------------------
-# Minimal OAuth 2.0 shim (Authorization Code + PKCE, RFC 7591 registration).
+# OAuth 2.1-style authorization-code + PKCE facade.
 #
-# Some MCP clients (notably ChatGPT's Connectors UI) only offer "OAuth" or
-# "No auth" when adding a custom connector -- there is no field for a
-# static bearer token. Rather than weakening TokenGate or shipping a
-# second, ChatGPT-only build of loopback, this shim implements just enough
-# of RFC 6749 + RFC 7636 (PKCE) + RFC 7591 (dynamic client registration)
-# for ChatGPT to complete a real OAuth handshake. The access_token it hands
-# back at the end of that handshake IS the existing static TOKEN -- the
-# exact same secret in ~/.config/loopback/token that Perplexity and every
-# other client already send as `Authorization: Bearer TOKEN`. Nothing about
-# the underlying auth model changes; this only adds a discovery/handshake
-# layer in front of it. The /oauth/authorize step still requires knowing
-# TOKEN, so a client that has registered but doesn't have the secret can
-# reach /authorize but cannot obtain a code.
+# Direct MCP clients may keep using the machine bearer token. OAuth clients
+# receive short-lived signed access tokens instead, so the permanent machine
+# secret is never handed to ChatGPT or another OAuth client.
 # ---------------------------------------------------------------------------
 
 _OAUTH_CLIENTS: dict[str, dict[str, Any]] = {}
 _OAUTH_CODES: dict[str, dict[str, Any]] = {}
 _CODE_TTL_SECONDS = 300
+_ACCESS_TTL_SECONDS = 3600
+_REFRESH_TTL_SECONDS = 30 * 24 * 3600
+_OAUTH_SIGNING_KEY = hashlib.sha256(("loopback-oauth:" + TOKEN).encode()).digest()
 
 
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
+def _oauth_base() -> str:
+    return f"https://{PUBLIC_HOST}"
+
+
+def _oauth_resource() -> str:
+    return f"{_oauth_base()}/mcp"
+
+
+def _redirect_uri_allowed(uri: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(uri)
+    except ValueError:
+        return False
+    if parsed.fragment or parsed.username or parsed.password:
+        return False
+    if parsed.scheme == "https" and bool(parsed.netloc):
+        return True
+    if parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+        return True
+    return False
+
+
+def _issue_oauth_token(kind: str, client_id: str, resource: str, ttl: int) -> str:
+    now = int(time.time())
+    claims = {
+        "iss": _oauth_base(),
+        "sub": client_id,
+        "aud": resource,
+        "iat": now,
+        "exp": now + ttl,
+        "jti": secrets.token_urlsafe(12),
+        "typ": kind,
+        "scope": "loopback",
+        "client_id": client_id,
+    }
+    return jwt.encode(claims, _OAUTH_SIGNING_KEY, algorithm="HS256")
+
+
+def _decode_oauth_token(token: str, kind: str, resource: str) -> dict[str, Any]:
+    claims = jwt.decode(
+        token,
+        _OAUTH_SIGNING_KEY,
+        algorithms=["HS256"],
+        audience=resource,
+        issuer=_oauth_base(),
+    )
+    if claims.get("typ") != kind or claims.get("scope") != "loopback":
+        raise jwt.InvalidTokenError("wrong token type or scope")
+    return claims
+
+
+def _valid_mcp_credential(value: str) -> bool:
+    raw = value.strip()
+    if raw.lower().startswith("bearer "):
+        raw = raw[7:].strip()
+    if secrets.compare_digest(raw, TOKEN):
+        return True
+    try:
+        _decode_oauth_token(raw, "access", _oauth_resource())
+        return True
+    except Exception:
+        return False
+
+
 @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
 async def oauth_protected_resource(request: Request) -> Response:
-    base = f"https://{PUBLIC_HOST}"
     return JSONResponse({
-        "resource": f"{base}/mcp",
-        "authorization_servers": [base],
+        "resource": _oauth_resource(),
+        "authorization_servers": [_oauth_base()],
+        "scopes_supported": ["loopback"],
+        "bearer_methods_supported": ["header"],
     })
 
 
 @mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
 async def oauth_metadata(request: Request) -> Response:
-    base = f"https://{PUBLIC_HOST}"
+    base = _oauth_base()
     return JSONResponse({
         "issuer": base,
         "authorization_endpoint": f"{base}/oauth/authorize",
@@ -653,14 +713,22 @@ async def oauth_register(request: Request) -> Response:
         body = await request.json()
     except Exception:
         body = {}
-
-    client_id = secrets.token_urlsafe(16)
     redirect_uris = body.get("redirect_uris") or []
-    _OAUTH_CLIENTS[client_id] = {"redirect_uris": redirect_uris}
+    if not isinstance(redirect_uris, list) or not redirect_uris:
+        return JSONResponse({"error": "invalid_client_metadata", "error_description": "redirect_uris required"}, status_code=400)
+    if any(not isinstance(uri, str) or not _redirect_uri_allowed(uri) for uri in redirect_uris):
+        return JSONResponse({"error": "invalid_redirect_uri"}, status_code=400)
 
+    client_id = secrets.token_urlsafe(18)
+    _OAUTH_CLIENTS[client_id] = {
+        "redirect_uris": redirect_uris,
+        "client_name": str(body.get("client_name") or "MCP client")[:200],
+        "created_at": time.time(),
+    }
     return JSONResponse(
         {
             "client_id": client_id,
+            "client_name": _OAUTH_CLIENTS[client_id]["client_name"],
             "redirect_uris": redirect_uris,
             "token_endpoint_auth_method": "none",
             "grant_types": ["authorization_code", "refresh_token"],
@@ -676,12 +744,24 @@ async def oauth_authorize(request: Request) -> Response:
     client_id = q.get("client_id", "")
     redirect_uri = q.get("redirect_uri", "")
     state = q.get("state", "")
+    response_type = q.get("response_type", "code")
     code_challenge = q.get("code_challenge", "")
-    code_challenge_method = q.get("code_challenge_method", "S256")
+    code_challenge_method = q.get("code_challenge_method", "")
+    resource = q.get("resource", _oauth_resource())
+    scope = q.get("scope", "loopback")
     supplied_token = q.get("loopback_token", "")
 
-    if not redirect_uri:
-        return JSONResponse({"detail": "redirect_uri required"}, status_code=400)
+    client = _OAUTH_CLIENTS.get(client_id)
+    if response_type != "code":
+        return JSONResponse({"error": "unsupported_response_type"}, status_code=400)
+    if not client or redirect_uri not in client.get("redirect_uris", []):
+        return JSONResponse({"error": "invalid_client"}, status_code=400)
+    if code_challenge_method != "S256" or not code_challenge:
+        return JSONResponse({"error": "invalid_request", "error_description": "PKCE S256 is required"}, status_code=400)
+    if resource != _oauth_resource():
+        return JSONResponse({"error": "invalid_target"}, status_code=400)
+    if "loopback" not in scope.split():
+        return JSONResponse({"error": "invalid_scope"}, status_code=400)
 
     if not supplied_token:
         hidden = "".join(
@@ -690,124 +770,100 @@ async def oauth_authorize(request: Request) -> Response:
                 ("client_id", client_id),
                 ("redirect_uri", redirect_uri),
                 ("state", state),
+                ("response_type", response_type),
                 ("code_challenge", code_challenge),
                 ("code_challenge_method", code_challenge_method),
+                ("resource", resource),
+                ("scope", scope),
             ]
         )
         safe_host = html_lib.escape(PUBLIC_HOST, quote=True)
-        safe_client = html_lib.escape(client_id or "dynamic client", quote=True)
+        safe_client = html_lib.escape(str(client.get("client_name") or client_id), quote=True)
         html = f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Loopback // OAuth</title>
-<style>
-:root{{--ink:#090b0d;--panel:#11151a;--line:#2a3138;--yellow:#ffd600;--cyan:#6ee7ff;--muted:#91a0ad;--text:#f5f7f8}}
-*{{box-sizing:border-box}} body{{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#1b2229 0,#0b0e11 45%,#050607 100%);color:var(--text);font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;padding:24px}}
-.card{{width:min(560px,100%);background:linear-gradient(180deg,#12171c,#0d1115);border:1px solid #2b333a;border-radius:22px;box-shadow:0 28px 90px #000a,0 0 0 1px #ffd60012;overflow:hidden}}
-.top{{padding:28px 30px 22px;border-bottom:1px solid var(--line);position:relative}}
-.badge{{display:inline-flex;gap:9px;align-items:center;color:var(--yellow);font-size:12px;letter-spacing:.18em;text-transform:uppercase}}
-.logo{{width:94px;height:58px;display:block;margin:18px 0 8px}}
-h1{{font-size:27px;margin:8px 0 8px;letter-spacing:-.04em}} .sub{{color:var(--muted);font-size:13px;line-height:1.65;margin:0}}
-.meta{{display:grid;grid-template-columns:90px 1fr;gap:8px 14px;margin-top:18px;padding:13px 15px;border:1px solid var(--line);border-radius:12px;background:#080b0e;font-size:12px}}
-.meta b{{color:var(--cyan);font-weight:500}} .meta span{{overflow-wrap:anywhere;color:#c8d0d6}}
-.body{{padding:25px 30px 30px}} label{{display:block;color:#e7ecef;font-size:12px;margin:0 0 9px;letter-spacing:.08em;text-transform:uppercase}}
-input{{width:100%;border:1px solid #38424b;background:#07090b;color:#fff;border-radius:11px;padding:14px 15px;font:inherit;outline:none;transition:.15s}} input:focus{{border-color:var(--yellow);box-shadow:0 0 0 3px #ffd6001f}}
-.hint{{font-size:11px;color:var(--muted);margin:9px 2px 18px;line-height:1.55}} code{{color:var(--cyan)}}
-button{{width:100%;border:0;border-radius:11px;padding:14px 16px;background:var(--yellow);color:#090909;font:700 13px inherit;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;box-shadow:0 8px 28px #ffd6001f}} button:hover{{filter:brightness(1.06)}}
-.foot{{margin-top:16px;color:#66737e;font-size:10px;text-align:center}}
-</style>
-</head>
-<body>
-<main class="card">
-  <section class="top">
-    <div class="badge"><span>◆</span> LOOPBACK AUTH GATE</div>
-    <svg class="logo" viewBox="0 0 300 160" aria-label="Loopback infinity logo">
-      <path d="M28 80C28 25 78 25 150 80s122 55 122 0S222 25 150 80 28 135 28 80" fill="none" stroke="#050505" stroke-width="36" stroke-linecap="round"/>
-      <path d="M28 80C28 25 78 25 150 80s122 55 122 0S222 25 150 80 28 135 28 80" fill="none" stroke="#ffd600" stroke-width="22" stroke-linecap="round"/>
-    </svg>
-    <h1>Authorize machine access</h1>
-    <p class="sub">A web agent is requesting an authenticated MCP session. Supply this machine's Loopback token to continue.</p>
-    <div class="meta"><b>HOST</b><span>{safe_host}</span><b>CLIENT</b><span>{safe_client}</span></div>
-  </section>
-  <section class="body">
-    <form method="get" action="/oauth/authorize" autocomplete="off">
-      {hidden}
-      <label for="loopback_token">Loopback token</label>
-      <input id="loopback_token" type="password" name="loopback_token" spellcheck="false" autocomplete="current-password" autofocus required>
-      <p class="hint">On the target machine, retrieve it with <code>loopback token</code>. The token is exchanged through OAuth and is not displayed back to the client.</p>
-      <button type="submit">Authorize connector</button>
-    </form>
-    <div class="foot">MCP // OAuth 2.0 + PKCE // {safe_host}</div>
-  </section>
-</main>
-</body>
-</html>"""
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Loopback // OAuth</title><style>
+:root{{--panel:#11151a;--line:#2a3138;--yellow:#ffd600;--cyan:#6ee7ff;--muted:#91a0ad;--text:#f5f7f8}}
+*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#1b2229 0,#0b0e11 45%,#050607 100%);color:var(--text);font-family:"SFMono-Regular",Consolas,monospace;padding:24px}}
+.card{{width:min(560px,100%);background:linear-gradient(180deg,#12171c,#0d1115);border:1px solid #2b333a;border-radius:22px;box-shadow:0 28px 90px #000a;overflow:hidden}}.top{{padding:28px 30px 22px;border-bottom:1px solid var(--line)}}.badge{{color:var(--yellow);font-size:12px;letter-spacing:.18em}}h1{{font-size:27px;margin:16px 0 8px}}.sub{{color:var(--muted);font-size:13px;line-height:1.65}}.meta{{display:grid;grid-template-columns:90px 1fr;gap:8px 14px;margin-top:18px;padding:13px 15px;border:1px solid var(--line);border-radius:12px;background:#080b0e;font-size:12px}}.meta b{{color:var(--cyan)}}.body{{padding:25px 30px 30px}}label{{display:block;font-size:12px;margin-bottom:9px}}input{{width:100%;border:1px solid #38424b;background:#07090b;color:#fff;border-radius:11px;padding:14px 15px;font:inherit;outline:none}}input:focus{{border-color:var(--yellow)}}button{{width:100%;margin-top:14px;border:0;border-radius:11px;padding:14px;background:var(--yellow);color:#090909;font:700 13px inherit;cursor:pointer}}code{{color:var(--cyan)}}.hint{{font-size:11px;color:var(--muted);line-height:1.55}}
+</style></head><body><main class="card"><section class="top"><div class="badge">◆ LOOPBACK AUTH GATE</div><h1>Authorize machine access</h1>
+<p class="sub">Authorize {safe_client} to access this Loopback endpoint. The permanent machine token stays on this host; the client receives a short-lived OAuth credential.</p>
+<div class="meta"><b>HOST</b><span>{safe_host}</span><b>CLIENT</b><span>{safe_client}</span></div></section>
+<section class="body"><form method="get" action="/oauth/authorize" autocomplete="off">{hidden}
+<label for="loopback_token">Loopback token</label><input id="loopback_token" type="password" name="loopback_token" autocomplete="current-password" autofocus required>
+<p class="hint">Retrieve locally with <code>loopback token</code>. PKCE protects the authorization code exchange.</p><button>Authorize connector</button></form></section></main></body></html>"""
         return HTMLResponse(html, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
     if not secrets.compare_digest(supplied_token, TOKEN):
         return HTMLResponse(
-            "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
-            "<body style='margin:0;min-height:100vh;display:grid;place-items:center;background:#07090b;color:#f5f7f8;font:14px monospace'>"
-            "<div style='max-width:520px;padding:28px;border:1px solid #343b42;border-radius:16px;background:#101419'>"
-            "<b style='color:#ffd600'>LOOPBACK // ACCESS DENIED</b><p>The supplied token is invalid.</p>"
-            "<p style='color:#91a0ad'>Return to the connector flow and use the token from <code style='color:#6ee7ff'>loopback token</code>.</p></div></body>",
+            "<!doctype html><body style='background:#07090b;color:#fff;font:14px monospace;padding:40px'>"
+            "<h2 style='color:#ffd600'>LOOPBACK // ACCESS DENIED</h2><p>The supplied token is invalid.</p></body>",
             status_code=401,
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )
 
-    code = secrets.token_urlsafe(24)
+    code = secrets.token_urlsafe(32)
     _OAUTH_CODES[code] = {
+        "client_id": client_id,
         "code_challenge": code_challenge,
-        "code_challenge_method": code_challenge_method,
         "redirect_uri": redirect_uri,
+        "resource": resource,
+        "scope": scope,
         "expires": time.time() + _CODE_TTL_SECONDS,
     }
-
-    sep = "&" if "?" in redirect_uri else "?"
-    location = f"{redirect_uri}{sep}code={code}"
+    params = {"code": code}
     if state:
-        location += f"&state={state}"
-
-    return RedirectResponse(location, status_code=302)
+        params["state"] = state
+    params["iss"] = _oauth_base()
+    sep = "&" if "?" in redirect_uri else "?"
+    return RedirectResponse(redirect_uri + sep + urllib.parse.urlencode(params), status_code=302)
 
 
 @mcp.custom_route("/oauth/token", methods=["POST"])
 async def oauth_token(request: Request) -> Response:
     form = await request.form()
-    grant_type = form.get("grant_type")
+    grant_type = str(form.get("grant_type") or "")
+    resource = str(form.get("resource") or _oauth_resource())
+    if resource != _oauth_resource():
+        return JSONResponse({"error": "invalid_target"}, status_code=400)
 
     if grant_type == "authorization_code":
-        code = form.get("code", "")
-        verifier = form.get("code_verifier", "")
+        code = str(form.get("code") or "")
+        verifier = str(form.get("code_verifier") or "")
+        client_id = str(form.get("client_id") or "")
+        redirect_uri = str(form.get("redirect_uri") or "")
         entry = _OAUTH_CODES.pop(code, None)
-
         if not entry or entry["expires"] < time.time():
             return JSONResponse({"error": "invalid_grant"}, status_code=400)
-
-        challenge = entry.get("code_challenge")
-        if challenge:
-            calc = _b64url(hashlib.sha256(verifier.encode()).digest())
-            if not secrets.compare_digest(calc, challenge):
-                return JSONResponse({"error": "invalid_grant"}, status_code=400)
+        if client_id != entry["client_id"] or redirect_uri != entry["redirect_uri"] or resource != entry["resource"]:
+            return JSONResponse({"error": "invalid_grant"}, status_code=400)
+        calc = _b64url(hashlib.sha256(verifier.encode()).digest())
+        if not secrets.compare_digest(calc, entry["code_challenge"]):
+            return JSONResponse({"error": "invalid_grant"}, status_code=400)
 
         return JSONResponse({
-            "access_token": TOKEN,
+            "access_token": _issue_oauth_token("access", client_id, resource, _ACCESS_TTL_SECONDS),
+            "refresh_token": _issue_oauth_token("refresh", client_id, resource, _REFRESH_TTL_SECONDS),
             "token_type": "Bearer",
-            "expires_in": 315360000,
-        })
+            "expires_in": _ACCESS_TTL_SECONDS,
+            "scope": "loopback",
+        }, headers={"Cache-Control": "no-store"})
 
     if grant_type == "refresh_token":
+        refresh = str(form.get("refresh_token") or "")
+        try:
+            claims = _decode_oauth_token(refresh, "refresh", resource)
+        except Exception:
+            return JSONResponse({"error": "invalid_grant"}, status_code=400)
+        client_id = str(claims["client_id"])
         return JSONResponse({
-            "access_token": TOKEN,
+            "access_token": _issue_oauth_token("access", client_id, resource, _ACCESS_TTL_SECONDS),
+            "refresh_token": _issue_oauth_token("refresh", client_id, resource, _REFRESH_TTL_SECONDS),
             "token_type": "Bearer",
-            "expires_in": 315360000,
-        })
+            "expires_in": _ACCESS_TTL_SECONDS,
+            "scope": "loopback",
+        }, headers={"Cache-Control": "no-store"})
 
     return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
-
-
 
 
 def _admin_session_ok(request: Request) -> bool:
@@ -1184,17 +1240,7 @@ class TokenGate:
                 h.get("api-key", "").strip(),
             ]
 
-            valid = any(
-                (
-                    secrets.compare_digest(x, TOKEN)
-                    or secrets.compare_digest(
-                        x,
-                        f"Bearer {TOKEN}",
-                    )
-                )
-                for x in candidates
-                if x
-            )
+            valid = any(_valid_mcp_credential(x) for x in candidates if x)
 
             if not valid:
                 r = JSONResponse(
