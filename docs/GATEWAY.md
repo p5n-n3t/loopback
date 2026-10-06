@@ -1,8 +1,6 @@
 # Fleet gateway
 
-A Loopback installation can act as the single MCP connector in front of several machines.
-
-The recommended topology is:
+Loopback can be the single MCP connector in front of several machines.
 
 ```text
 Web agent
@@ -11,21 +9,74 @@ Web agent
 gateway.example.com/mcp
    |
    +-- local
-   +-- node1
-   +-- node2
-   +-- node3
+   +-- ora3
+   +-- ora4
+   +-- homelab
 ```
 
-Keep each node independently authenticated and reachable through its own Loopback endpoint. The gateway should identify targets explicitly and must not share one universal bearer token across every machine.
+## v3 transport
 
-## Standard fleet operations
+The initial self-hosted fleet transport is SSH. This is intentional:
 
-For a portable/public setup, prefer target-aware file, Git, search, and diagnostic operations. Keep arbitrary command execution as a separately administered trusted capability rather than the default public profile.
+- mature host-key verification
+- per-host keys and policies
+- no new fleet-wide secret
+- works with existing aliases, jump hosts and VPN routes
+- easy to understand and recover without Loopback
 
-## Current development gateway
+`~/.config/loopback/nodes.json` stores node labels/transports/targets. It does not store private keys or passwords.
 
-The development instance for this repository uses named targets and exposes target discovery plus an administrator-managed trusted execution path. Those machine-specific SSH aliases and credentials are intentionally not committed to the public repository.
+## Configure
 
-## Direct node endpoints
+```bash
+loopback node add ora3 ora3
+loopback node add ora4 jq@ora4.example.net
+loopback node list
+loopback node health ora3
+```
 
-Individual node endpoints remain useful for debugging, recovery, and clients that do not understand fleet routing. A gateway is an additional convenience layer, not a reason to remove per-node authentication.
+From MCP:
+
+- `node_list`
+- `node_health`
+- `node_command`
+- `node_copy`
+
+## Stateful work
+
+Use `node_command` for discrete remote commands. For complex stateful remote workflows, either:
+
+- use a direct Loopback endpoint on that machine, or
+- execute a remote tmux/systemd/container workflow through SSH.
+
+A future node-agent transport can add outbound rendezvous without removing SSH or direct endpoints.
+
+## Hosted relay direction
+
+A hosted Loopback service is **optional**, not a requirement of the local agent.
+
+Potential topology:
+
+```text
+ChatGPT / Perplexity
+        |
+        v
+managed Loopback gateway
+        |
+        +-- outbound-connected laptop
+        +-- outbound-connected VPS
+        +-- outbound-connected home server
+```
+
+The same gateway protocol should also be self-hostable. The commercial convenience layer must not make Cloudflare/Tailscale/direct self-hosting second-class.
+
+## Security
+
+Prefer:
+
+- dedicated gateway account
+- SSH config aliases
+- per-host keys
+- constrained sudo
+- distinct production/test nodes
+- no universal bearer copied across hosts
