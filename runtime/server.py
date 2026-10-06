@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import html as html_lib
+import json
 import os
 import secrets
+import shutil
+import signal
 import socket
 import subprocess
 import time
@@ -12,11 +16,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import httpx
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 from mcp.server import MCPServer
+from mcp.types import ToolAnnotations
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+
+from audit import AuditStore
+from dashboard import render_dashboard, render_login
+from fleet import FleetStore
+from jobs import JobManager, TerminalManager
+from policy import PolicyError, PolicyStore
 
 
 CFG = Path.home() / ".config" / "loopback"
@@ -33,6 +47,16 @@ DEFAULT_TIMEOUT = int(os.environ.get("LOOPBACK_COMMAND_TIMEOUT", "120"))
 MAX_OUTPUT = int(os.environ.get("LOOPBACK_MAX_OUTPUT_BYTES", "1048576"))
 SHELL = os.environ.get("LOOPBACK_SHELL", "/usr/bin/zsh")
 ACCESS_MODE = os.environ.get("LOOPBACK_ACCESS_MODE", "standard")
+STARTED_AT = time.time()
+
+POLICY = PolicyStore(CFG)
+if not POLICY.path.exists() and ACCESS_MODE in {"standard", "trusted", "read-only", "locked"}:
+    POLICY.data["profile"] = ACCESS_MODE
+AUDIT = AuditStore(CFG)
+JOBS = JobManager(CFG, SHELL)
+TERMINALS = TerminalManager(SHELL)
+FLEET = FleetStore(CFG)
+_ADMIN_SESSIONS: dict[str, float] = {}
 
 
 def clip(text: str) -> tuple[str, bool]:
@@ -61,7 +85,7 @@ mcp = MCPServer("Loopback")
 
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
 def read_file(
     path: str,
     start_line: int = 1,
@@ -69,7 +93,7 @@ def read_file(
 ) -> dict[str, Any]:
     """Read a text file with line-range controls."""
 
-    p = Path(path).expanduser().resolve()
+    p = POLICY.check_path(path, write=False)
     start_line = max(1, int(start_line))
     max_lines = max(1, min(int(max_lines), 10000))
 
@@ -88,7 +112,7 @@ def read_file(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
 def write_file(
     path: str,
     content: str,
@@ -97,7 +121,7 @@ def write_file(
 ) -> dict[str, Any]:
     """Write or append UTF-8 text as the current user."""
 
-    p = Path(path).expanduser().resolve()
+    p = POLICY.check_path(path, write=True)
 
     if create_parents:
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -115,14 +139,14 @@ def write_file(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
 def list_dir(
     path: str = "~",
     max_entries: int = 1000,
 ) -> dict[str, Any]:
     """List a directory with simple metadata."""
 
-    p = Path(path).expanduser().resolve()
+    p = POLICY.check_path(path, write=False)
     max_entries = max(1, min(int(max_entries), 10000))
 
     out = []
@@ -164,7 +188,7 @@ def list_dir(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
 def patch_file(
     path: str,
     old_text: str,
@@ -173,7 +197,7 @@ def patch_file(
     create_backup: bool = True,
 ) -> dict[str, Any]:
     """Replace exact text in a file, optionally keeping a timestamped backup."""
-    p = Path(path).expanduser().resolve()
+    p = POLICY.check_path(path, write=True)
     text = p.read_text(encoding="utf-8", errors="strict")
     found = text.count(old_text)
     if found == 0:
@@ -193,7 +217,7 @@ def patch_file(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
 def search_text(
     query: str,
     path: str = "~",
@@ -203,7 +227,7 @@ def search_text(
 ) -> dict[str, Any]:
     """Search text recursively while skipping dependency/cache directories."""
     import fnmatch
-    root = Path(path).expanduser().resolve()
+    root = POLICY.check_path(path, write=False)
     limit = max(1, min(int(max_results), 5000))
     needle_text = query if case_sensitive else query.lower()
     skip_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__", ".cache", "dist", "build"}
@@ -246,11 +270,11 @@ def search_text(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
 def tail_file(path: str, lines: int = 200) -> dict[str, Any]:
     """Return the last N lines of a text or log file."""
     from collections import deque
-    p = Path(path).expanduser().resolve()
+    p = POLICY.check_path(path, write=False)
     n = max(1, min(int(lines), 10000))
     with p.open("r", encoding="utf-8", errors="replace") as handle:
         selected = list(deque(handle, maxlen=n))
@@ -263,7 +287,7 @@ def tail_file(path: str, lines: int = 200) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
 def git_info(path: str = "~") -> dict[str, Any]:
     """Return branch, root, remotes and concise working-tree state for a Git repo."""
     cwd = resolve_cwd(path)
@@ -286,7 +310,7 @@ def git_info(path: str = "~") -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
 def diagnostics() -> dict[str, Any]:
     """Return lightweight runtime diagnostics without exposing stored credentials."""
     import shutil
@@ -312,7 +336,7 @@ def diagnostics() -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
 def machine_info() -> dict[str, Any]:
     """Return basic non-secret context for the machine."""
 
@@ -325,6 +349,250 @@ def machine_info() -> dict[str, Any]:
         "public_host": PUBLIC_HOST,
         "access_mode": ACCESS_MODE,
     }
+
+
+
+
+# ---------------------------------------------------------------------------
+# Loopback v2: execution, jobs, terminals, processes, policy and fleet routing.
+# ---------------------------------------------------------------------------
+
+def _secure_cwd(value: str | None) -> str:
+    p = POLICY.check_path(value or "~", write=False)
+    if not p.is_dir():
+        raise ValueError(f"cwd is not a directory: {p}")
+    return str(p)
+
+
+@mcp.tool(
+    title="Execute command",
+    annotations=ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+)
+def execute(
+    command: str,
+    cwd: str | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Run a shell command with bounded output and Loopback policy enforcement."""
+    POLICY.check_command(command, approval_id=approval_id)
+    workdir = _secure_cwd(cwd)
+    limit = max(1, min(int(timeout), 3600))
+    started = time.time()
+    try:
+        proc = subprocess.run(
+            [SHELL, "-lc", command],
+            cwd=workdir,
+            text=True,
+            capture_output=True,
+            timeout=limit,
+        )
+        stdout, out_trunc = clip(proc.stdout)
+        stderr, err_trunc = clip(proc.stderr)
+        return {
+            "command": command,
+            "cwd": workdir,
+            "returncode": proc.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "truncated": out_trunc or err_trunc,
+            "duration_ms": int((time.time() - started) * 1000),
+        }
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout if isinstance(exc.stdout, str) else ""
+        err = exc.stderr if isinstance(exc.stderr, str) else ""
+        return {
+            "command": command,
+            "cwd": workdir,
+            "returncode": None,
+            "stdout": clip(out)[0],
+            "stderr": clip(err)[0],
+            "timed_out": True,
+            "duration_ms": int((time.time() - started) * 1000),
+        }
+
+
+@mcp.tool(title="Start background job", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
+def job_start(command: str, cwd: str | None = None, approval_id: str | None = None) -> dict[str, Any]:
+    """Start a long-running command and return immediately with a job ID."""
+    POLICY.check_command(command, approval_id=approval_id)
+    return JOBS.start(command, _secure_cwd(cwd))
+
+
+@mcp.tool(title="List background jobs", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
+def job_list() -> list[dict[str, Any]]:
+    """List background jobs started by Loopback."""
+    return JOBS.list()
+
+
+@mcp.tool(title="Read job output", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=False, open_world_hint=False))
+def job_output(job_id: str, offset: int = 0, max_bytes: int = 131072) -> dict[str, Any]:
+    """Read incremental output from a background job."""
+    return JOBS.output(job_id, offset, max_bytes)
+
+
+@mcp.tool(title="Stop background job", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False))
+def job_stop(job_id: str, signal_name: str = "TERM") -> dict[str, Any]:
+    """Stop a Loopback background job and its process group."""
+    POLICY.check_process_control()
+    sig = getattr(signal, "SIG" + signal_name.upper(), None)
+    if not isinstance(sig, signal.Signals):
+        raise ValueError("unsupported signal")
+    return JOBS.stop(job_id, int(sig))
+
+
+@mcp.tool(title="Start persistent terminal", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
+def terminal_start(cwd: str | None = None, rows: int = 30, cols: int = 120) -> dict[str, Any]:
+    """Start a persistent PTY shell for interactive or long-running workflows."""
+    if POLICY.profile in {"locked", "read-only"} or not POLICY.data.get("allow_shell", True):
+        raise PolicyError("terminal access is disabled by policy")
+    return TERMINALS.start(_secure_cwd(cwd), rows=rows, cols=cols)
+
+
+@mcp.tool(title="Write terminal input", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
+def terminal_write(terminal_id: str, data: str, approval_id: str | None = None) -> dict[str, Any]:
+    """Write keystrokes/text to a persistent terminal."""
+    if data.strip():
+        POLICY.check_command(data, approval_id=approval_id)
+    return TERMINALS.write(terminal_id, data)
+
+
+@mcp.tool(title="Read terminal output", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=False, open_world_hint=False))
+def terminal_read(terminal_id: str, max_bytes: int = 131072, clear: bool = True) -> dict[str, Any]:
+    """Read buffered output from a persistent terminal."""
+    return TERMINALS.read(terminal_id, max_bytes=max_bytes, clear=clear)
+
+
+@mcp.tool(title="Resize terminal", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
+def terminal_resize(terminal_id: str, rows: int = 30, cols: int = 120) -> dict[str, Any]:
+    """Resize a persistent terminal PTY."""
+    return TERMINALS.resize(terminal_id, rows, cols)
+
+
+@mcp.tool(title="Close terminal", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False))
+def terminal_close(terminal_id: str) -> dict[str, Any]:
+    """Close a persistent terminal session."""
+    POLICY.check_process_control()
+    return TERMINALS.close(terminal_id)
+
+
+@mcp.tool(title="List processes", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
+def process_list(query: str = "", limit: int = 200) -> dict[str, Any]:
+    """Return structured process information, optionally filtered by text."""
+    proc = subprocess.run(
+        ["ps", "-eo", "pid=,ppid=,user=,%cpu=,%mem=,stat=,etimes=,comm=,args="],
+        text=True,
+        capture_output=True,
+        timeout=15,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "ps failed")
+    needle = query.lower().strip()
+    rows: list[dict[str, Any]] = []
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split(None, 8)
+        if len(parts) < 9:
+            continue
+        pid, ppid, user, cpu, mem, stat, etimes, comm, args = parts
+        if needle and needle not in line.lower():
+            continue
+        rows.append({
+            "pid": int(pid),
+            "ppid": int(ppid),
+            "user": user,
+            "cpu_percent": float(cpu),
+            "memory_percent": float(mem),
+            "state": stat,
+            "elapsed_seconds": int(etimes),
+            "command": comm,
+            "args": args,
+        })
+        if len(rows) >= max(1, min(int(limit), 2000)):
+            break
+    return {"returned": len(rows), "processes": rows}
+
+
+@mcp.tool(title="Signal process", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
+def process_kill(pid: int, signal_name: str = "TERM", tree: bool = False) -> dict[str, Any]:
+    """Send a signal to a process, optionally signaling descendants first."""
+    POLICY.check_process_control()
+    target = int(pid)
+    if target in {1, os.getpid(), os.getppid()}:
+        raise PolicyError("refusing to signal a protected Loopback/system process")
+    sig = getattr(signal, "SIG" + signal_name.upper(), None)
+    if not isinstance(sig, signal.Signals):
+        raise ValueError("unsupported signal")
+    killed: list[int] = []
+    if tree:
+        ps = subprocess.run(["ps", "-eo", "pid=,ppid="], text=True, capture_output=True, timeout=10)
+        children: dict[int, list[int]] = {}
+        for line in ps.stdout.splitlines():
+            try:
+                child_pid, parent_pid = [int(x) for x in line.split()[:2]]
+            except (ValueError, IndexError):
+                continue
+            children.setdefault(parent_pid, []).append(child_pid)
+        stack = list(children.get(target, []))
+        descendants: list[int] = []
+        while stack:
+            child = stack.pop()
+            descendants.append(child)
+            stack.extend(children.get(child, []))
+        for child in reversed(descendants):
+            try:
+                os.kill(child, sig)
+                killed.append(child)
+            except ProcessLookupError:
+                pass
+    os.kill(target, sig)
+    killed.append(target)
+    return {"signal": signal_name.upper(), "pids": killed}
+
+
+@mcp.tool(title="Loopback policy status", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
+def policy_status() -> dict[str, Any]:
+    """Show the effective Loopback security profile without exposing secrets."""
+    return {
+        "profile": POLICY.profile,
+        "allowed_roots": POLICY.data.get("allowed_roots", []),
+        "denied_roots": POLICY.data.get("denied_roots", []),
+        "allow_shell": POLICY.data.get("allow_shell", True),
+        "allow_process_control": POLICY.data.get("allow_process_control", True),
+        "allow_fleet": POLICY.data.get("allow_fleet", True),
+        "pending_approvals": len(POLICY.pending()),
+    }
+
+
+@mcp.tool(title="List Loopback nodes", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
+def node_list() -> list[dict[str, Any]]:
+    """List configured remote Loopback nodes. Credentials are never returned."""
+    POLICY.check_fleet()
+    return [{"name": "local", "url": f"http://127.0.0.1:{LOCAL_PORT}/mcp", "enabled": True}] + FLEET.list()
+
+
+@mcp.tool(title="Call tool on Loopback node", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
+async def node_call(node: str, tool: str, arguments: dict[str, Any] | None = None, timeout: int = DEFAULT_TIMEOUT) -> dict[str, Any]:
+    """Call an MCP tool on another registered Loopback node through one gateway."""
+    POLICY.check_fleet()
+    if node == "local":
+        raise ValueError("node_call is for remote nodes; call local tools directly")
+    info, token = FLEET.get(node)
+    if not info.get("enabled", True):
+        raise PolicyError("node is disabled")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    async with httpx.AsyncClient(headers=headers, timeout=max(5, min(int(timeout), 3600))) as client:
+        async with streamable_http_client(str(info["url"]), http_client=client) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.call_tool(tool, arguments or {})
+                if hasattr(result, "model_dump"):
+                    return result.model_dump(by_alias=True, exclude_none=True)
+                return {"result": str(result)}
 
 
 # ---------------------------------------------------------------------------
@@ -540,12 +808,205 @@ async def oauth_token(request: Request) -> Response:
     return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
 
 
+
+
+def _admin_session_ok(request: Request) -> bool:
+    sid = request.cookies.get("loopback_admin", "")
+    exp = _ADMIN_SESSIONS.get(sid, 0)
+    if exp <= time.time():
+        _ADMIN_SESSIONS.pop(sid, None)
+        return False
+    return True
+
+
+def _human_bytes(value: int) -> str:
+    n = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if n < 1024 or unit == "TiB":
+            return f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TiB"
+
+
+def _system_snapshot() -> dict[str, Any]:
+    load = list(os.getloadavg()) if hasattr(os, "getloadavg") else [0.0, 0.0, 0.0]
+    mem_total = mem_available = 0
+    try:
+        vals: dict[str, int] = {}
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            key, raw = line.split(":", 1)
+            vals[key] = int(raw.strip().split()[0]) * 1024
+        mem_total = vals.get("MemTotal", 0)
+        mem_available = vals.get("MemAvailable", 0)
+    except (OSError, ValueError):
+        pass
+    disk = shutil.disk_usage(Path.home())
+    return {
+        "hostname": socket.gethostname(),
+        "uptime_seconds": int(time.time() - STARTED_AT),
+        "load": [round(x, 2) for x in load],
+        "memory_total": mem_total,
+        "memory_used": max(0, mem_total - mem_available),
+        "memory_total_human": _human_bytes(mem_total),
+        "memory_used_human": _human_bytes(max(0, mem_total - mem_available)),
+        "disk_total": disk.total,
+        "disk_used": disk.used,
+        "disk_total_human": _human_bytes(disk.total),
+        "disk_used_human": _human_bytes(disk.used),
+        "python": os.sys.version.split()[0],
+    }
+
+
+def _admin_denied(request: Request) -> JSONResponse | None:
+    if not _admin_session_ok(request):
+        return JSONResponse({"detail": "admin authentication required"}, status_code=401)
+    return None
+
+
+@mcp.custom_route("/admin/login", methods=["GET", "POST"])
+async def admin_login(request: Request) -> Response:
+    if request.method == "GET":
+        return HTMLResponse(render_login(PUBLIC_HOST), headers={"Cache-Control": "no-store"})
+    form = await request.form()
+    supplied = str(form.get("token", ""))
+    if not secrets.compare_digest(supplied, TOKEN):
+        return HTMLResponse(render_login(PUBLIC_HOST, "Invalid Loopback token"), status_code=401)
+    sid = secrets.token_urlsafe(32)
+    _ADMIN_SESSIONS[sid] = time.time() + 12 * 3600
+    response = RedirectResponse("/admin", status_code=303)
+    response.set_cookie("loopback_admin", sid, max_age=12 * 3600, httponly=True,
+                        secure=PUBLIC_HOST not in {"localhost", "127.0.0.1"},
+                        samesite="strict", path="/")
+    return response
+
+
+@mcp.custom_route("/admin/logout", methods=["GET"])
+async def admin_logout(request: Request) -> Response:
+    sid = request.cookies.get("loopback_admin", "")
+    _ADMIN_SESSIONS.pop(sid, None)
+    response = RedirectResponse("/admin/login", status_code=303)
+    response.delete_cookie("loopback_admin", path="/")
+    return response
+
+
+@mcp.custom_route("/admin", methods=["GET"])
+async def admin_dashboard(request: Request) -> Response:
+    if not _admin_session_ok(request):
+        return RedirectResponse("/admin/login", status_code=303)
+    return HTMLResponse(render_dashboard(PUBLIC_HOST), headers={"Cache-Control": "no-store"})
+
+
+@mcp.custom_route("/api/admin/overview", methods=["GET"])
+async def admin_overview(request: Request) -> Response:
+    denied = _admin_denied(request)
+    if denied:
+        return denied
+    return JSONResponse({
+        "system": _system_snapshot(),
+        "policy": {"profile": POLICY.profile},
+        "jobs": JOBS.list(),
+        "terminals": TERMINALS.list(),
+        "approvals": POLICY.pending(),
+        "nodes": FLEET.list(),
+        "audit": AUDIT.stats(),
+        "recent": AUDIT.recent(80),
+    })
+
+
+@mcp.custom_route("/api/admin/policy", methods=["GET", "POST"])
+async def admin_policy(request: Request) -> Response:
+    denied = _admin_denied(request)
+    if denied:
+        return denied
+    if request.method == "GET":
+        return JSONResponse(dict(POLICY.data))
+    body = await request.json()
+    allowed_keys = {
+        "profile", "allowed_roots", "denied_roots", "allow_shell",
+        "allow_process_control", "allow_fleet", "approval_ttl_seconds",
+        "require_approval_patterns", "deny_command_patterns",
+    }
+    updates = {k: v for k, v in body.items() if k in allowed_keys}
+    if "profile" in updates and updates["profile"] not in {"standard", "trusted", "read-only", "locked"}:
+        return JSONResponse({"detail": "invalid profile"}, status_code=400)
+    return JSONResponse(POLICY.save(updates))
+
+
+@mcp.custom_route("/api/admin/approvals/{approval_id}/approve", methods=["POST"])
+async def admin_approve(request: Request) -> Response:
+    denied = _admin_denied(request)
+    if denied:
+        return denied
+    body = await request.json()
+    try:
+        result = POLICY.approve(request.path_params["approval_id"], uses=int(body.get("uses", 1)),
+                                ttl_seconds=body.get("ttl_seconds"))
+    except KeyError:
+        return JSONResponse({"detail": "approval not found"}, status_code=404)
+    return JSONResponse(result)
+
+
+@mcp.custom_route("/api/admin/jobs/{job_id}/stop", methods=["POST"])
+async def admin_stop_job(request: Request) -> Response:
+    denied = _admin_denied(request)
+    if denied:
+        return denied
+    POLICY.check_process_control()
+    try:
+        return JSONResponse(JOBS.stop(request.path_params["job_id"]))
+    except KeyError:
+        return JSONResponse({"detail": "job not found"}, status_code=404)
+
+
+@mcp.custom_route("/api/admin/terminals/{terminal_id}/close", methods=["POST"])
+async def admin_close_terminal(request: Request) -> Response:
+    denied = _admin_denied(request)
+    if denied:
+        return denied
+    POLICY.check_process_control()
+    try:
+        return JSONResponse(TERMINALS.close(request.path_params["terminal_id"]))
+    except KeyError:
+        return JSONResponse({"detail": "terminal not found"}, status_code=404)
+
+
+@mcp.custom_route("/api/admin/nodes", methods=["GET", "POST"])
+async def admin_nodes(request: Request) -> Response:
+    denied = _admin_denied(request)
+    if denied:
+        return denied
+    if request.method == "GET":
+        return JSONResponse(FLEET.list())
+    body = await request.json()
+    name = str(body.get("name", "")).strip()
+    url = str(body.get("url", "")).strip()
+    if not name or not url:
+        return JSONResponse({"detail": "name and url are required"}, status_code=400)
+    try:
+        node = FLEET.upsert(name, url, str(body.get("token", "")) or None,
+                            enabled=bool(body.get("enabled", True)),
+                            description=str(body.get("description", "")))
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    return JSONResponse(node, status_code=201)
+
+
+@mcp.custom_route("/api/admin/nodes/{node_name}", methods=["DELETE"])
+async def admin_node_delete(request: Request) -> Response:
+    denied = _admin_denied(request)
+    if denied:
+        return denied
+    return JSONResponse({"removed": FLEET.remove(request.path_params["node_name"])})
+
+
 @mcp.custom_route("/healthz", methods=["GET"])
 async def healthz(request: Request) -> Response:
     return JSONResponse({
         "ok": True,
         "service": "loopback",
-        "version": "2.2.0-standard",
+        "version": "3.0.0-v2-preview",
+        "policy_profile": POLICY.profile,
+        "uptime_seconds": int(time.time() - STARTED_AT),
     })
 
 
@@ -581,9 +1042,77 @@ inner = mcp.streamable_http_app(
 )
 
 
+class AuditGate:
+    """Record MCP activity without storing bearer credentials or request bodies."""
+
+    def __init__(self, wrapped):
+        self.wrapped = wrapped
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("path") != "/mcp" or scope.get("method") != "POST":
+            return await self.wrapped(scope, receive, send)
+
+        chunks: list[bytes] = []
+        more = True
+        while more:
+            message = await receive()
+            if message.get("type") != "http.request":
+                continue
+            chunks.append(message.get("body", b""))
+            more = bool(message.get("more_body", False))
+        body = b"".join(chunks)
+        used = False
+
+        async def replay_receive():
+            nonlocal used
+            if not used:
+                used = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
+
+        status_code = 200
+
+        async def wrapped_send(message):
+            nonlocal status_code
+            if message.get("type") == "http.response.start":
+                status_code = int(message.get("status", 200))
+            await send(message)
+
+        tool = "mcp"
+        target = None
+        try:
+            payload = json.loads(body.decode("utf-8")) if body else {}
+            if isinstance(payload, dict):
+                method = str(payload.get("method") or "mcp")
+                tool = method
+                params = payload.get("params") or {}
+                if method == "tools/call" and isinstance(params, dict):
+                    target = str(params.get("name") or "") or None
+                    tool = target or method
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            pass
+
+        started = time.time()
+        error = None
+        try:
+            await self.wrapped(scope, replay_receive, wrapped_send)
+        except Exception as exc:
+            error = type(exc).__name__
+            raise
+        finally:
+            headers = {k.decode("latin1").lower(): v.decode("latin1") for k, v in scope.get("headers", [])}
+            AUDIT.record(
+                tool,
+                "ok" if error is None and status_code < 400 else (error or f"http_{status_code}"),
+                duration_ms=int((time.time() - started) * 1000),
+                target=target,
+                detail={"user_agent": headers.get("user-agent", "")[:300]},
+            )
+
+
 # Browser-based MCP clients need the MCP headers exposed.
 cors = CORSMiddleware(
-    inner,
+    AuditGate(inner),
     allow_origins=[
         f"https://{PUBLIC_HOST}",
         "https://www.perplexity.ai",
