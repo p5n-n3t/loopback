@@ -597,6 +597,49 @@ async def node_call(node: str, tool: str, arguments: dict[str, Any] | None = Non
                 return {"result": str(result)}
 
 
+@mcp.tool(title="Read file on Loopback node", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
+async def node_read_file(
+    node: str,
+    path: str,
+    start_line: int = 1,
+    max_lines: int = 1000,
+) -> dict[str, Any]:
+    """Read a text file on a registered Loopback node."""
+    return await node_call(
+        node,
+        "read_file",
+        {"path": path, "start_line": start_line, "max_lines": max_lines},
+    )
+
+
+@mcp.tool(title="Execute command on Loopback node", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
+async def node_execute(
+    node: str,
+    command: str,
+    cwd: str | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
+    approval_id: str | None = None,
+) -> dict[str, Any]:
+    """Run a command on a registered Loopback node using that node's own policy."""
+    args: dict[str, Any] = {
+        "command": command,
+        "timeout": timeout,
+    }
+    if cwd is not None:
+        args["cwd"] = cwd
+    if approval_id is not None:
+        args["approval_id"] = approval_id
+    return await node_call(node, "execute", args, timeout=timeout)
+
+
+@mcp.tool(title="Node diagnostics", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
+async def node_diagnostics(node: str, timeout: int = 30) -> dict[str, Any]:
+    """Return diagnostics from a registered Loopback node."""
+    return await node_call(node, "diagnostics", {}, timeout=timeout)
+
+
+
+
 # ---------------------------------------------------------------------------
 # OAuth 2.1-style authorization-code + PKCE facade.
 #
