@@ -780,10 +780,37 @@ async def api_policy_tool(request: Request) -> Response:
     return JSONResponse(value)
 
 
+@mcp.custom_route("/api/policy/paths", methods=["POST"])
+async def api_policy_paths(request: Request) -> Response:
+    denied = _admin_required(request)
+    if denied:
+        return denied
+    body = await request.json()
+    allow = [str(x).strip() for x in body.get("allow", []) if str(x).strip()]
+    deny_paths = [str(x).strip() for x in body.get("deny", []) if str(x).strip()]
+    value = POLICY.set_paths(allow, deny_paths)
+    AUDIT.write("policy_paths", detail={"allow": allow, "deny": deny_paths})
+    return JSONResponse(value)
+
+
 @mcp.custom_route("/api/jobs", methods=["GET"])
 async def api_jobs(request: Request) -> Response:
     denied = _admin_required(request)
     return denied or JSONResponse({"jobs": JOBS.list(), "terminals": TERMINALS.list()})
+
+
+@mcp.custom_route("/api/jobs/{job_id}/output", methods=["GET"])
+async def api_job_output(request: Request) -> Response:
+    denied = _admin_required(request)
+    if denied:
+        return denied
+    return JSONResponse(
+        JOBS.output(
+            request.path_params["job_id"],
+            int(request.query_params.get("offset", "0")),
+            int(request.query_params.get("max_bytes", "131072")),
+        )
+    )
 
 
 @mcp.custom_route("/api/jobs/{job_id}/stop", methods=["POST"])
@@ -837,6 +864,14 @@ async def api_nodes(request: Request) -> Response:
     return JSONResponse(node)
 
 
+@mcp.custom_route("/api/nodes/{name}/health", methods=["GET"])
+async def api_node_health(request: Request) -> Response:
+    denied = _admin_required(request)
+    if denied:
+        return denied
+    return JSONResponse(NODES.health(request.path_params["name"], SHELL))
+
+
 @mcp.custom_route("/api/nodes/{name}", methods=["DELETE"])
 async def api_node_delete(request: Request) -> Response:
     denied = _admin_required(request)
@@ -846,6 +881,15 @@ async def api_node_delete(request: Request) -> Response:
     NODES.remove(name)
     AUDIT.write("node_remove", detail={"name": name})
     return JSONResponse({"ok": True})
+
+
+@mcp.custom_route("/api/clients", methods=["GET"])
+async def api_clients(request: Request) -> Response:
+    denied = _admin_required(request)
+    if denied:
+        return denied
+    rows = sorted(_CLIENTS.values(), key=lambda row: row.get("last_seen", 0), reverse=True)
+    return JSONResponse({"clients": rows})
 
 
 @mcp.custom_route("/api/approvals", methods=["GET"])
