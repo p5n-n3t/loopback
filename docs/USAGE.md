@@ -2,19 +2,106 @@
 
 ## Lifecycle
 
-`loopback up` starts the local MCP server and then the configured ingress.
+```bash
+loopback up
+loopback down
+loopback restart
+loopback status
+loopback doctor
+```
 
-`loopback down` stops ingress first and then stops the MCP server.
+`up` starts the localhost MCP origin and then the selected ingress. `down`
+reverses the sequence.
 
-`loopback restart` performs a clean down/up cycle.
+## Endpoints
 
-`loopback status` reports profile, ingress, endpoint, timeout, and output limits.
+```bash
+loopback url
+loopback dashboard
+```
+
+The MCP path is `/mcp`; the admin UI is `/admin`.
+
+## Credentials
+
+```bash
+loopback token
+loopback rotate-token
+```
+
+Print the token only when explicitly needed. Rotation restarts the service and
+invalidates OAuth credentials derived from the previous secret.
+
+## Policy
+
+```bash
+loopback policy show
+loopback policy profile standard
+loopback policy profile trusted
+loopback policy profile read-only
+loopback policy profile locked
+```
+
+The dashboard exposes the same profile switch plus bounded approval actions.
+
+## Choosing an execution tool
+
+### Short command
+
+Use `execute` for commands that should finish within a bounded request.
+
+### Long-running non-interactive task
+
+Use:
+
+```text
+job_start -> job_output(offset=...) -> job_stop
+```
+
+Output offsets let a client fetch only new log bytes.
+
+### Stateful/interactive shell
+
+Use:
+
+```text
+terminal_start -> terminal_write -> terminal_read -> terminal_close
+```
+
+The PTY remains alive across MCP calls.
+
+### Process inspection
+
+Use `process_list` for structured process metadata. Use `process_kill` only
+when the intended process and side effect are clear.
+
+## Fleet
+
+```bash
+loopback node list
+loopback node add NAME https://host.example/mcp
+loopback node remove NAME
+```
+
+Agents use `node_list` and `node_call` to route work.
+
+## Dashboard
+
+The dashboard is optimized for:
+
+- system health and Loopback uptime
+- live jobs/terminals
+- policy profile
+- pending approvals
+- node inventory
+- recent audit history
+
+The CLI remains the best interface for bootstrap, headless automation, and
+recovery when public ingress is unavailable.
 
 ## Boot persistence
 
 Fresh installs enable user-systemd autostart when systemd is available.
-
-Manage it with:
 
 ```bash
 loopback autostart on
@@ -22,81 +109,25 @@ loopback autostart off
 loopback autostart status
 ```
 
-On Linux, Loopback also enables user lingering when passwordless sudo is available so the user service can start at boot without an interactive login.
-
-Pass `--no-autostart` to `install.sh` if you want a session-only installation.
-
-## Diagnostics
-
-Run:
-
-```bash
-loopback doctor
-```
-
-It checks the Python environment, runtime file, auth token, Git, the chosen ingress dependency, and local/public health endpoints.
-
-For server logs:
-
-```bash
-loopback logs 200
-loopback logs -f
-```
-
-## Endpoint
-
-Print the active MCP URL with:
-
-```bash
-loopback url
-```
-
-The MCP path is always `/mcp`.
-
-## Credentials
-
-Print the current local token only when you explicitly need it:
-
-```bash
-loopback token
-```
-
-Rotate it with:
-
-```bash
-loopback rotate-token
-```
-
-Rotation restarts the service so the new credential is active immediately.
+Pass `--no-autostart` to the installer for session-only operation.
 
 ## Configuration
 
-Show configuration:
-
 ```bash
 loopback config list
-```
-
-Read one value:
-
-```bash
 loopback config get LOOPBACK_PORT
-```
-
-Set one value:
-
-```bash
 loopback config set LOOPBACK_TIMEOUT 300
 ```
 
-Restart Loopback after settings that affect the running server or transport.
+Restart after changing settings that affect runtime or transport.
 
-## Files
+## Runtime state
 
-Generated runtime state is under:
+Generated state is kept under:
 
-```
+```text
 ~/.config/loopback/
 ```
 
-The repository itself should remain free of machine credentials and generated runtime state.
+This includes machine credentials, policy, node registry/secrets, audit database,
+job logs, service logs, PID files, and the installed runtime. Do not commit it.
