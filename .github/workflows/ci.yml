@@ -29,3 +29,17 @@ jobs:
         run: bash -n install.sh bin/loopback
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+      - name: Build portable plugin package
+        run: |
+          python scripts/build_plugin.py --mcp-url https://loopback.example.com/mcp --output /tmp/loopback-plugin.zip
+          python - <<'PY'
+          import json, zipfile
+          p="/tmp/loopback-plugin.zip"
+          with zipfile.ZipFile(p) as z:
+              names=set(z.namelist())
+              assert {"plugin.json","mcp.json","skills/loopback/SKILL.md"} <= names
+              plugin=json.loads(z.read("plugin.json"))
+              mcp=json.loads(z.read("mcp.json"))
+              assert plugin["name"] == "loopback"
+              assert mcp["mcpServers"]["loopback"]["url"] == "https://loopback.example.com/mcp"
+          PY
