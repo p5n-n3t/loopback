@@ -25,6 +25,9 @@ DEFAULT_POLICY: dict[str, Any] = {
     "allow_shell": True,
     "allow_process_control": True,
     "allow_fleet": True,
+    "allow_browser": False,
+    "allowed_tools": ["*"],
+    "denied_tools": [],
     "require_approval_patterns": [
         r"(^|\s)sudo(\s|$)",
         r"\b(rm|unlink)\b.*\s(-[^\n]*r|--recursive)",
@@ -234,6 +237,22 @@ class PolicyStore:
                     a.id,
                     f"approval_required:{a.id}: approve it in the Loopback dashboard or switch the policy profile to trusted",
                 )
+
+    def check_tool(self, tool: str) -> None:
+        """Enforce explicit per-tool allow/deny policy."""
+        name = str(tool).strip()
+        if not name:
+            raise PolicyError("tool name is required")
+        denied = {str(x) for x in (self.data.get("denied_tools") or [])}
+        if "*" in denied or name in denied:
+            raise PolicyError(f"tool is denied by policy: {name}")
+        allowed = {str(x) for x in (self.data.get("allowed_tools") or ["*"])}
+        if "*" not in allowed and name not in allowed:
+            raise PolicyError(f"tool is not in allowed_tools: {name}")
+
+    def check_browser(self) -> None:
+        if self.profile in {"locked", "read-only"} or not bool(self.data.get("allow_browser", False)):
+            raise PolicyError("browser automation is disabled by policy")
 
     def check_process_control(self) -> None:
         if self.profile in {"locked", "read-only"} or not bool(self.data.get("allow_process_control", True)):
