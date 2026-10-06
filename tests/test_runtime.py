@@ -12,6 +12,8 @@ RUNTIME = Path(__file__).resolve().parents[1] / "runtime"
 sys.path.insert(0, str(RUNTIME))
 
 from audit import AuditStore
+from browser import BrowserAdapter
+from documents import DocumentTools
 from dashboard import render_dashboard, render_login
 from fleet import FleetStore
 from jobs import JobManager, TerminalManager
@@ -59,6 +61,22 @@ class PolicyTests(unittest.TestCase):
         self.policy.save({"profile": "trusted"})
         with self.assertRaises(PolicyError):
             self.policy.check_command("rm -rf /")
+
+
+    def test_per_tool_allow_deny(self):
+        self.policy.save({"allowed_tools": ["read_file", "diagnostics"], "denied_tools": []})
+        self.policy.check_tool("read_file")
+        with self.assertRaises(PolicyError):
+            self.policy.check_tool("execute")
+        self.policy.save({"allowed_tools": ["*"], "denied_tools": ["process_kill"]})
+        with self.assertRaises(PolicyError):
+            self.policy.check_tool("process_kill")
+
+    def test_browser_disabled_by_default(self):
+        with self.assertRaises(PolicyError):
+            self.policy.check_browser()
+        self.policy.save({"allow_browser": True})
+        self.policy.check_browser()
 
 
 class AuditTests(unittest.TestCase):
@@ -119,6 +137,60 @@ class TerminalTests(unittest.TestCase):
                 self.assertIn("LOOPBACK_PTY_OK", data)
             finally:
                 t.close(info["id"])
+
+
+class DocumentTests(unittest.TestCase):
+    def test_docx_xlsx_pdf_roundtrip(self):
+        from docx import Document
+        from openpyxl import Workbook
+        from pypdf import PdfWriter
+
+        tools = DocumentTools()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+
+            docx = root / "sample.docx"
+            doc = Document()
+            doc.add_paragraph("hello Loopback")
+            doc.save(docx)
+            self.assertIn("hello Loopback", tools.docx_text(docx)["paragraphs"])
+            replaced = root / "replaced.docx"
+            result = tools.docx_replace_text(docx, "Loopback", "world", replaced)
+            self.assertEqual(result["replacements"], 1)
+            self.assertIn("hello world", tools.docx_text(replaced)["paragraphs"])
+
+            xlsx = root / "sample.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Data"
+            ws["A1"] = "one"
+            wb.save(xlsx)
+            self.assertEqual(tools.xlsx_read_range(xlsx, "Data", "A1:A1")["values"], [["one"]])
+            out_xlsx = root / "out.xlsx"
+            tools.xlsx_write_range(xlsx, "Data", "B2", [[1, 2], [3, 4]], out_xlsx)
+            self.assertEqual(
+                tools.xlsx_read_range(out_xlsx, "Data", "B2:C3")["values"],
+                [[1, 2], [3, 4]],
+            )
+
+            pdf = root / "sample.pdf"
+            writer = PdfWriter()
+            writer.add_blank_page(width=100, height=100)
+            writer.add_blank_page(width=100, height=100)
+            with pdf.open("wb") as handle:
+                writer.write(handle)
+            extracted = root / "one.pdf"
+            result = tools.pdf_extract_pages(pdf, [2], extracted)
+            self.assertEqual(result["pages"], [2])
+            self.assertEqual(tools.pdf_text(extracted)["total_pages"], 1)
+
+
+class BrowserAdapterTests(unittest.TestCase):
+    def test_status_and_validation(self):
+        browser = BrowserAdapter("definitely-not-installed-loopback-browser")
+        self.assertFalse(browser.status()["available"])
+        with self.assertRaises(ValueError):
+            browser.open("http://example.com")
 
 
 class DashboardTests(unittest.TestCase):
