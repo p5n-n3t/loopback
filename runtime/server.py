@@ -1285,7 +1285,7 @@ async def healthz(request: Request) -> Response:
     return JSONResponse({
         "ok": True,
         "service": "loopback",
-        "version": "3.0.0-v2-preview",
+        "version": "3.0.0",
         "policy_profile": POLICY.profile,
         "uptime_seconds": int(time.time() - STARTED_AT),
     })
