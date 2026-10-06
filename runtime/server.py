@@ -14,7 +14,7 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
@@ -114,12 +114,12 @@ def _prune_tokens() -> None:
                 mapping.pop(key, None)
 
 
-def _new_oauth_pair(subject: str) -> dict[str, Any]:
+def _new_oauth_pair(subject: str, resource: str) -> dict[str, Any]:
     _prune_tokens()
     access = "lb_at_" + secrets.token_urlsafe(32)
     refresh = "lb_rt_" + secrets.token_urlsafe(40)
-    _OAUTH_ACCESS[access] = {"subject": subject, "expires": time.time() + _ACCESS_TTL}
-    _OAUTH_REFRESH[refresh] = {"subject": subject, "expires": time.time() + _REFRESH_TTL}
+    _OAUTH_ACCESS[access] = {"subject": subject, "resource": resource, "expires": time.time() + _ACCESS_TTL}
+    _OAUTH_REFRESH[refresh] = {"subject": subject, "resource": resource, "expires": time.time() + _REFRESH_TTL}
     return {
         "access_token": access,
         "token_type": "Bearer",
@@ -321,7 +321,8 @@ def command_run(command: str, cwd: str = "~", timeout: int | None = None, approv
     """Run one command and return output. Disabled unless policy permits it."""
     POLICY.require_tool("command_run" if node == "local" else "node_command")
     _command_guard(command, approval_id)
-    result = NODES.command(node, command, shell=SHELL, timeout=min(int(timeout or DEFAULT_TIMEOUT), 3600), cwd=cwd)
+    effective_cwd = resolve_cwd(cwd) if node == "local" else cwd
+    result = NODES.command(node, command, shell=SHELL, timeout=min(int(timeout or DEFAULT_TIMEOUT), 3600), cwd=effective_cwd)
     result["stdout"], out_cut = clip(result["stdout"])
     result["stderr"], err_cut = clip(result["stderr"])
     result["truncated"] = out_cut or err_cut
@@ -378,7 +379,7 @@ def task_run(steps: list[str], cwd: str = "~", stop_on_error: bool = True, appro
         )
     results = []
     for index, step in enumerate(steps):
-        result = NODES.command("local", step, shell=SHELL, timeout=DEFAULT_TIMEOUT, cwd=cwd)
+        result = NODES.command("local", step, shell=SHELL, timeout=DEFAULT_TIMEOUT, cwd=resolve_cwd(cwd))
         stdout, a = clip(result["stdout"])
         stderr, b = clip(result["stderr"])
         row = {"index": index, "command": step, "returncode": result["returncode"], "stdout": stdout, "stderr": stderr, "truncated": a or b}
@@ -600,6 +601,7 @@ async def oauth_metadata(request: Request) -> Response:
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
         "scopes_supported": ["loopback"],
+        "authorization_response_iss_parameter_supported": True,
     })
 
 
@@ -623,39 +625,43 @@ async def oauth_register(request: Request) -> Response:
     }, status_code=201)
 
 
-@mcp.custom_route("/oauth/authorize", methods=["GET"])
+@mcp.custom_route("/oauth/authorize", methods=["GET", "POST"])
 async def oauth_authorize(request: Request) -> Response:
-    q = request.query_params
+    q = await request.form() if request.method == "POST" else request.query_params
     client_id = q.get("client_id", "")
     redirect_uri = q.get("redirect_uri", "")
     state = q.get("state", "")
     challenge = q.get("code_challenge", "")
     method = q.get("code_challenge_method", "")
     supplied = q.get("loopback_token", "")
+    resource = q.get("resource", f"{_public_base()}/mcp")
     client = _OAUTH_CLIENTS.get(client_id)
     if not client or redirect_uri not in client.get("redirect_uris", []):
         return JSONResponse({"error": "invalid_client"}, status_code=400)
     if method != "S256" or not challenge:
         return JSONResponse({"error": "invalid_request", "error_description": "PKCE S256 required"}, status_code=400)
+    if resource != f"{_public_base()}/mcp":
+        return JSONResponse({"error": "invalid_target", "error_description": "resource must match this Loopback MCP endpoint"}, status_code=400)
     if not supplied:
         hidden = "".join(
             f'<input type="hidden" name="{html_lib.escape(k, quote=True)}" value="{html_lib.escape(v, quote=True)}">'
-            for k, v in [("client_id", client_id), ("redirect_uri", redirect_uri), ("state", state), ("code_challenge", challenge), ("code_challenge_method", method)]
+            for k, v in [("client_id", client_id), ("redirect_uri", redirect_uri), ("state", state), ("code_challenge", challenge), ("code_challenge_method", method), ("resource", resource)]
         )
         safe_host = html_lib.escape(PUBLIC_HOST, quote=True)
         safe_client = html_lib.escape(client_id, quote=True)
         page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Loopback // OAuth</title>
 <style>:root{{--yellow:#ffd600;--cyan:#6ee7ff;--muted:#91a0ad;--text:#f5f7f8}}*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#1b2229 0,#0b0e11 45%,#050607 100%);color:var(--text);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;padding:24px}}.card{{width:min(560px,100%);background:linear-gradient(180deg,#12171c,#0d1115);border:1px solid #2b333a;border-radius:22px;box-shadow:0 28px 90px #000a;overflow:hidden}}.top{{padding:28px 30px 22px;border-bottom:1px solid #2a3138}}.badge{{color:var(--yellow);font-size:12px;letter-spacing:.18em}}h1{{font-size:27px;margin:18px 0 8px}}p{{color:var(--muted);line-height:1.6}}.meta{{display:grid;grid-template-columns:90px 1fr;gap:8px 14px;margin-top:18px;padding:13px 15px;border:1px solid #2a3138;border-radius:12px;background:#080b0e;font-size:12px}}.meta b{{color:var(--cyan)}}.body{{padding:25px 30px 30px}}label{{display:block;font-size:12px;margin:0 0 9px;text-transform:uppercase}}input{{width:100%;border:1px solid #38424b;background:#07090b;color:#fff;border-radius:11px;padding:14px 15px;font:inherit}}button{{width:100%;border:0;border-radius:11px;padding:14px;background:var(--yellow);font-weight:800;margin-top:15px}}</style></head>
-<body><main class="card"><section class="top"><div class="badge">◆ LOOPBACK AUTH GATE</div><h1>Authorize machine access</h1><p>A web agent is requesting an authenticated MCP session. The machine token is used only to authorize this grant; the client receives a separate short-lived OAuth access token.</p><div class="meta"><b>HOST</b><span>{safe_host}</span><b>CLIENT</b><span>{safe_client}</span></div></section><section class="body"><form method="get" action="/oauth/authorize" autocomplete="off">{hidden}<label>Loopback token</label><input type="password" name="loopback_token" autocomplete="current-password" autofocus required><button type="submit">Authorize connector</button></form></section></main></body></html>"""
+<body><main class="card"><section class="top"><div class="badge">◆ LOOPBACK AUTH GATE</div><h1>Authorize machine access</h1><p>A web agent is requesting an authenticated MCP session. The machine token is used only to authorize this grant; the client receives a separate short-lived OAuth access token.</p><div class="meta"><b>HOST</b><span>{safe_host}</span><b>CLIENT</b><span>{safe_client}</span></div></section><section class="body"><form method="post" action="/oauth/authorize" autocomplete="off">{hidden}<label>Loopback token</label><input type="password" name="loopback_token" autocomplete="current-password" autofocus required><button type="submit">Authorize connector</button></form></section></main></body></html>"""
         return HTMLResponse(page, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
     if not secrets.compare_digest(supplied, TOKEN):
         return HTMLResponse("<body style='background:#07090b;color:white;font:14px monospace;padding:40px'><h2>LOOPBACK // ACCESS DENIED</h2><p>Invalid machine token.</p></body>", status_code=401)
     code = secrets.token_urlsafe(28)
-    _OAUTH_CODES[code] = {"client_id": client_id, "redirect_uri": redirect_uri, "challenge": challenge, "expires": time.time() + _CODE_TTL}
+    _OAUTH_CODES[code] = {"client_id": client_id, "redirect_uri": redirect_uri, "challenge": challenge, "resource": resource, "expires": time.time() + _CODE_TTL}
     sep = "&" if "?" in redirect_uri else "?"
-    location = f"{redirect_uri}{sep}code={code}"
+    redirect_params = {"code": code, "iss": _public_base()}
     if state:
-        location += f"&state={state}"
+        redirect_params["state"] = state
+    location = f"{redirect_uri}{sep}{urlencode(redirect_params)}"
     AUDIT.write("oauth_authorize", detail={"client_id": client_id})
     return RedirectResponse(location, status_code=302)
 
@@ -674,14 +680,14 @@ async def oauth_token(request: Request) -> Response:
         calc = _b64url(hashlib.sha256(verifier.encode()).digest())
         if not secrets.compare_digest(calc, entry["challenge"]):
             return JSONResponse({"error": "invalid_grant"}, status_code=400)
-        return JSONResponse(_new_oauth_pair(entry["client_id"]))
+        return JSONResponse(_new_oauth_pair(entry["client_id"], entry["resource"]))
     if grant == "refresh_token":
         old = str(form.get("refresh_token", ""))
         _prune_tokens()
         entry = _OAUTH_REFRESH.pop(old, None)
         if not entry or entry["expires"] < time.time():
             return JSONResponse({"error": "invalid_grant"}, status_code=400)
-        return JSONResponse(_new_oauth_pair(entry["subject"]))
+        return JSONResponse(_new_oauth_pair(entry["subject"], entry["resource"]))
     return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
 
 
