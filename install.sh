@@ -133,7 +133,7 @@ python3 -m venv "$VENV"
 "$VENV/bin/python" -m pip install --upgrade pip wheel >/dev/null
 "$VENV/bin/pip" install -r "$ROOT/requirements.txt"
 
-cp "$ROOT/runtime/server.py" "$CFG/server.py"
+cp "$ROOT/runtime/"*.py "$CFG/"
 cp "$ROOT/bin/loopback" "$CLI"
 chmod 755 "$CLI"
 
