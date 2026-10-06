@@ -329,7 +329,10 @@ node(){
       LOOPBACK_NODE_TOKEN="$token_value" "$VENV/bin/python" - "$CFG/nodes.json" "$CFG/nodes.secrets.json" "$name" "$endpoint" <<'PY'
 import json, os, sys
 from pathlib import Path
-nodes_path,secrets_path,name,url=map(Path,[]) if False else (Path(sys.argv[1]),Path(sys.argv[2]),sys.argv[3],sys.argv[4])
+nodes_path = Path(sys.argv[1])
+secrets_path = Path(sys.argv[2])
+name = sys.argv[3]
+url = sys.argv[4]
 try: rows=json.loads(nodes_path.read_text())
 except Exception: rows=[]
 rows=[n for n in rows if n.get("name") != name]
