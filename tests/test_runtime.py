@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+RUNTIME = Path(__file__).resolve().parents[1] / "runtime"
+sys.path.insert(0, str(RUNTIME))
+
+from audit import AuditStore
+from dashboard import render_dashboard, render_login
+from fleet import FleetStore
+from jobs import JobManager, TerminalManager
+from policy import ApprovalRequired, PolicyError, PolicyStore
+
+
+class PolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Path(self.tmp.name)
+        self.home = self.cfg / "home"
+        self.home.mkdir()
+        self.allowed = self.home / "projects"
+        self.allowed.mkdir()
+        self.denied = self.home / "secret"
+        self.denied.mkdir()
+        self.policy = PolicyStore(self.cfg)
+        self.policy.save({
+            "profile": "standard",
+            "allowed_roots": [str(self.home)],
+            "denied_roots": [str(self.denied)],
+            "allow_shell": True,
+            "allow_process_control": True,
+            "allow_fleet": True,
+        })
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_path_allow_deny(self):
+        self.assertEqual(self.policy.check_path(self.allowed), self.allowed.resolve())
+        with self.assertRaises(PolicyError):
+            self.policy.check_path(self.denied / "x")
+
+    def test_sensitive_command_approval_roundtrip(self):
+        with self.assertRaises(ApprovalRequired) as ctx:
+            self.policy.check_command("sudo systemctl stop demo")
+        approval_id = ctx.exception.approval_id
+        self.policy.approve(approval_id)
+        self.policy.check_command("sudo systemctl stop demo", approval_id=approval_id)
+        with self.assertRaises(ApprovalRequired):
+            self.policy.check_command("sudo systemctl stop demo", approval_id=approval_id)
+
+    def test_hard_block_even_trusted(self):
+        self.policy.save({"profile": "trusted"})
+        with self.assertRaises(PolicyError):
+            self.policy.check_command("rm -rf /")
+
+
+class AuditTests(unittest.TestCase):
+    def test_record_and_stats(self):
+        with tempfile.TemporaryDirectory() as td:
+            a = AuditStore(Path(td))
+            a.record("read_file", "ok", duration_ms=2, target="/tmp/x")
+            a.record("execute", "error", duration_ms=7)
+            rows = a.recent(10)
+            self.assertEqual(len(rows), 2)
+            stats = a.stats()
+            self.assertEqual(stats["total"], 2)
+            self.assertEqual(stats["failures"], 1)
+
+
+class FleetTests(unittest.TestCase):
+    def test_node_secrets_are_separate(self):
+        with tempfile.TemporaryDirectory() as td:
+            f = FleetStore(Path(td))
+            f.upsert("ora3", "https://ora3.example/mcp", "secret")
+            listed = f.list()
+            self.assertEqual(listed[0]["name"], "ora3")
+            self.assertNotIn("token", listed[0])
+            node, token = f.get("ora3")
+            self.assertEqual(token, "secret")
+            self.assertTrue(f.remove("ora3"))
+
+
+class JobTests(unittest.TestCase):
+    def test_background_job_output(self):
+        with tempfile.TemporaryDirectory() as td:
+            j = JobManager(Path(td), "/bin/sh")
+            info = j.start("printf hello", td)
+            for _ in range(30):
+                current = j.info(info["id"])
+                if not current["running"]:
+                    break
+                time.sleep(0.05)
+            out = j.output(info["id"])
+            self.assertIn("hello", out["content"])
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "PTY test requires Unix")
+class TerminalTests(unittest.TestCase):
+    def test_terminal_roundtrip(self):
+        t = TerminalManager("/bin/sh")
+        with tempfile.TemporaryDirectory() as td:
+            info = t.start(td, shell="/bin/sh")
+            try:
+                t.read(info["id"], clear=True)
+                t.write(info["id"], "printf LOOPBACK_PTY_OK\\n")
+                data = ""
+                for _ in range(30):
+                    time.sleep(0.05)
+                    data += t.read(info["id"])["content"]
+                    if "LOOPBACK_PTY_OK" in data:
+                        break
+                self.assertIn("LOOPBACK_PTY_OK", data)
+            finally:
+                t.close(info["id"])
+
+
+class DashboardTests(unittest.TestCase):
+    def test_render(self):
+        self.assertIn("LOOPBACK CONTROL PLANE", render_login("example.test"))
+        html = render_dashboard("example.test")
+        self.assertIn("Recent MCP activity", html)
+        self.assertIn("Persistent terminals", html)
+        self.assertIn("Nodes", html)
+
+
+if __name__ == "__main__":
+    unittest.main()
