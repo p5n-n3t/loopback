@@ -38,7 +38,8 @@ PLUGIN_JSON = {
                     "Inspect processes and system health",
                     "Route work to registered Loopback nodes",
                     "Work with DOCX, XLSX, and PDF files",
-                    "Use optional structured browser automation"
+                    "Use optional structured browser automation",
+                    "Use optional native desktop automation"
                 ],
                 "defaultPrompt": [
                     "Use Loopback to inspect the connected machine and help me complete this task.",
@@ -73,6 +74,7 @@ connected through Loopback.
 - Treat process signaling and shell execution as side-effecting.
 - Use structured document tools instead of shelling out when they fit the file.
 - Use browser automation only when the capability is enabled and the task requires web interaction.
+- Use native desktop tools only when enabled and the user explicitly needs interaction with local GUI applications.
 - Never expose credentials, tokens, private keys, recovery codes, or unrelated
   secrets in user-visible output.
 
