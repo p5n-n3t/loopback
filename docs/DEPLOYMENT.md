@@ -1,10 +1,25 @@
 # Deployment
 
-## Headless Cloudflare deployment
+Loopback deliberately supports more than one network topology.
 
-For servers, CI, and fleet provisioning, Loopback supports a remotely-managed Cloudflare Tunnel token file.
+## Local only
 
-Create and configure the tunnel centrally, place its runtime token in a temporary file on the target host, then run:
+```bash
+./install.sh --non-interactive --ingress local
+```
+
+Useful for development, desktop clients that can reach localhost, or a machine
+behind another private transport.
+
+## Cloudflare Tunnel
+
+Interactive:
+
+```bash
+./install.sh --ingress cloudflare --host loopback.example.com
+```
+
+For headless servers, use a centrally managed tunnel token file:
 
 ```bash
 ./install.sh \
@@ -15,18 +30,45 @@ Create and configure the tunnel centrally, place its runtime token in a temporar
   --cloudflare-token-file /path/to/token
 ```
 
-The installer copies the token to `~/.config/loopback/cloudflared.token` with mode `0600`. The CLI starts the tunnel using `cloudflared tunnel run --token-file`, so the credential is not placed directly in the process command line.
+The installer copies the token into the Loopback config directory with mode
+0600. Configure Cloudflare to route the hostname to:
 
-The Cloudflare-side tunnel configuration should route the public hostname to:
-
-```
+```text
 http://127.0.0.1:2026
 ```
 
-The MCP connector URL is:
+## Tailscale Funnel
 
-```
-https://loopback-node.example.com/mcp
+Select Tailscale during installation. Loopback keeps the MCP service on
+localhost and asks Tailscale to publish it over HTTPS.
+
+## Existing reverse proxy
+
+It is also valid to keep Loopback in local mode and point an existing nginx,
+Caddy, Traefik, or other HTTPS reverse proxy at `127.0.0.1:2026`.
+
+Preserve the MCP method/headers and do not strip the `Mcp-Session-Id` response
+header.
+
+## URLs
+
+```text
+MCP:       https://host.example/mcp
+Dashboard: https://host.example/admin
+Health:    https://host.example/healthz
 ```
 
-Each machine should use its own tunnel token. Do not reuse one tunnel token as a fleet-wide credential.
+OAuth discovery lives under the standard well-known paths on the same origin.
+
+## Fleet deployment
+
+Install Loopback independently on each node. Give each node its own ingress and
+credential, then register selected node endpoints on the gateway.
+
+Do not distribute a universal fleet bearer token.
+
+## Hosted relay direction
+
+A future hosted Loopback gateway can let agents use one universal endpoint while
+nodes make outbound connections. That is an optional convenience topology, not
+a requirement for direct/self-hosted Loopback.
