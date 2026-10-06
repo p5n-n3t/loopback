@@ -23,6 +23,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from audit import AuditLog
+from browser import BrowserController
 from dashboard import dashboard_html, login_html
 from jobs import JobManager, TerminalManager
 from metrics import host_metrics, process_info as get_process_info, process_kill as kill_process, process_list as get_process_list
@@ -53,6 +54,7 @@ APPROVALS = ApprovalStore()
 JOBS = JobManager()
 TERMINALS = TerminalManager()
 NODES = NodeRegistry()
+BROWSER = BrowserController()
 
 _CLIENTS: dict[str, dict[str, Any]] = {}
 _ADMIN_SESSIONS: dict[str, float] = {}
@@ -509,6 +511,62 @@ def node_copy(source_node: str, source_path: str, destination_node: str, destina
         rc, err = proc.returncode, proc.stderr
     _audit("node_copy", source_node=source_node, destination_node=destination_node, source=source_path, destination=destination_path, returncode=rc)
     return {"source_node": source_node, "destination_node": destination_node, "source_path": source_path, "destination_path": destination_path, "returncode": rc, "stderr": err}
+
+
+@mcp.tool()
+def browser_status() -> dict[str, Any]:
+    """Report whether the optional structured browser adapter is available."""
+    return BROWSER.status()
+
+
+@mcp.tool()
+def browser_open(url: str, session: str = "loopback") -> dict[str, Any]:
+    """Open an HTTP(S) page in an optional agent-browser session."""
+    POLICY.require_tool("browser_control")
+    result = BROWSER.open(url, session)
+    _audit("browser_open", session=session, url=url, returncode=result["returncode"])
+    return result
+
+
+@mcp.tool()
+def browser_snapshot(session: str = "loopback", interactive: bool = True) -> dict[str, Any]:
+    """Return the browser accessibility snapshot, optionally limited to interactive elements."""
+    POLICY.require_tool("browser_control")
+    return BROWSER.snapshot(session, interactive)
+
+
+@mcp.tool()
+def browser_click(selector: str, session: str = "loopback") -> dict[str, Any]:
+    """Click a browser element by structured selector or current snapshot reference."""
+    POLICY.require_tool("browser_control")
+    result = BROWSER.click(selector, session)
+    _audit("browser_click", session=session, selector=selector, returncode=result["returncode"])
+    return result
+
+
+@mcp.tool()
+def browser_fill(selector: str, text: str, session: str = "loopback") -> dict[str, Any]:
+    """Fill a browser field by structured selector or snapshot reference."""
+    POLICY.require_tool("browser_control")
+    result = BROWSER.fill(selector, text, session)
+    _audit("browser_fill", session=session, selector=selector, bytes=len(text.encode()), returncode=result["returncode"])
+    return result
+
+
+@mcp.tool()
+def browser_get(what: str, selector: str | None = None, session: str = "loopback") -> dict[str, Any]:
+    """Read browser text, HTML, value, title, URL, or count."""
+    POLICY.require_tool("browser_control")
+    return BROWSER.get(what, selector, session)
+
+
+@mcp.tool()
+def browser_close(session: str = "loopback") -> dict[str, Any]:
+    """Close an optional agent-browser session."""
+    POLICY.require_tool("browser_control")
+    result = BROWSER.close(session)
+    _audit("browser_close", session=session, returncode=result["returncode"])
+    return result
 
 
 @mcp.tool()
