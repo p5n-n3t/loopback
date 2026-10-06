@@ -95,6 +95,24 @@ Enable them intentionally from the dashboard by turning on browser automation.
 The adapter provides structured open/snapshot/click/fill/URL/close operations,
 not arbitrary JavaScript evaluation.
 
+## Optional native desktop automation
+
+Native desktop control is disabled by default. On a Linux/X11 node, enable it
+explicitly in the dashboard after confirming `desktop_status` reports the
+required local tools.
+
+Available operations include:
+
+- list visible windows
+- capture a desktop screenshot as MCP image content
+- activate a window
+- click coordinates
+- type text
+- send a constrained key expression
+
+This is deliberately a separate capability from browser automation so a server
+can allow one without allowing the other.
+
 ## Fleet
 
 ```bash
