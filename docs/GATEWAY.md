@@ -1,31 +1,75 @@
 # Fleet gateway
 
-A Loopback installation can act as the single MCP connector in front of several machines.
-
-The recommended topology is:
+A Loopback installation can act as one MCP connector in front of several machines.
 
 ```text
-Web agent
-   |
-   v
-gateway.example.com/mcp
-   |
-   +-- local
-   +-- node1
-   +-- node2
-   +-- node3
+MCP-capable agent
+        |
+        v
+ Loopback gateway
+   /     |      \
+local   ora3    ora4
 ```
 
-Keep each node independently authenticated and reachable through its own Loopback endpoint. The gateway should identify targets explicitly and must not share one universal bearer token across every machine.
+A gateway is optional. Every node can still be used directly.
 
-## Standard fleet operations
+## Register nodes
 
-For a portable/public setup, prefer target-aware file, Git, search, and diagnostic operations. Keep arbitrary command execution as a separately administered trusted capability rather than the default public profile.
+From the CLI:
 
-## Current development gateway
+```bash
+loopback node add ora3 https://ora3.example.com/mcp
+loopback node add ora4 https://ora4.example.com/mcp
+loopback node list
+```
 
-The development instance for this repository uses named targets and exposes target discovery plus an administrator-managed trusted execution path. Those machine-specific SSH aliases and credentials are intentionally not committed to the public repository.
+If a node uses a bearer token, enter it at the hidden prompt or supply it from an
+environment variable:
 
-## Direct node endpoints
+```bash
+export ORA3_LOOPBACK_TOKEN='...'
+loopback node add ora3 https://ora3.example.com/mcp --token-env ORA3_LOOPBACK_TOKEN
+unset ORA3_LOOPBACK_TOKEN
+```
 
-Individual node endpoints remain useful for debugging, recovery, and clients that do not understand fleet routing. A gateway is an additional convenience layer, not a reason to remove per-node authentication.
+The dashboard can also add/remove nodes.
+
+## MCP routing
+
+`node_list` returns the local gateway plus registered nodes without credentials.
+
+`node_call` takes:
+
+- `node` — registered node name
+- `tool` — tool name exposed by that node
+- `arguments` — the remote tool arguments
+- `timeout` — bounded network/tool timeout
+
+Example logical flow:
+
+```text
+node_list()
+node_call(node="ora3", tool="diagnostics", arguments={})
+node_call(node="ora4", tool="read_file", arguments={"path":"~/docker/app/compose.yml"})
+```
+
+Remote calls use the MCP protocol rather than SSH aliases. This keeps a node's
+transport/authentication independent from the gateway host.
+
+## Security model
+
+- nodes have independent credentials
+- credentials are stored in `nodes.secrets.json`, not returned by `node_list`
+- node metadata lives in `nodes.json`
+- the gateway honors its own fleet policy before routing
+- the remote node enforces its own policy again
+
+That produces two enforcement boundaries for routed operations: gateway policy
+and destination-node policy.
+
+## Future hosted relay
+
+The direct-node registry is intentionally compatible with a future optional
+hosted or self-hosted rendezvous layer. Such a service can add outbound device
+enrollment and discovery, but it should not replace direct Cloudflare/Tailscale
+operation for users who want a no-vendor-cloud topology.
