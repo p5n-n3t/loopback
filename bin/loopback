@@ -115,6 +115,7 @@ up(){
   start_ingress
   ok "Loopback is up"
   printf '  local:  http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
+  printf '  admin:  http://127.0.0.1:%s/admin\n' "$LOOPBACK_PORT"
   if [[ "${LOOPBACK_INGRESS:-local}" != "local" ]]; then
     printf '  public: https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
   fi
@@ -136,6 +137,7 @@ status(){
   printf '  profile: %s\n' "${LOOPBACK_ACCESS_MODE:-standard}"
   printf '  ingress: %s\n' "${LOOPBACK_INGRESS:-local}"
   printf '  local:   http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
+  printf '  admin:   http://127.0.0.1:%s/admin\n' "$LOOPBACK_PORT"
   [[ "${LOOPBACK_INGRESS:-local}" == "local" ]] || printf '  public:  https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
   printf '  timeout: %ss\n' "$LOOPBACK_TIMEOUT"
   printf '  maxout:  %s bytes\n' "$LOOPBACK_MAX_OUTPUT_BYTES"
@@ -264,6 +266,108 @@ EOF
   esac
 }
 
+
+dashboard(){
+  if [[ "${LOOPBACK_INGRESS:-local}" == "local" ]]; then
+    printf 'http://127.0.0.1:%s/admin\n' "$LOOPBACK_PORT"
+  else
+    printf 'https://%s/admin\n' "$LOOPBACK_PUBLIC_HOST"
+  fi
+}
+
+policy(){
+  local action="$(lower "${1:-show}")"
+  shift || true
+  case "$action" in
+    show|list)
+      if [[ -s "$CFG/policy.json" ]]; then
+        cat "$CFG/policy.json"
+      else
+        printf '{"profile":"%s","source":"defaults"}\n' "${LOOPBACK_ACCESS_MODE:-standard}"
+      fi
+      ;;
+    profile)
+      local profile="${1:?standard|trusted|read-only|locked}"
+      case "$profile" in standard|trusted|read-only|locked) ;; *) die "invalid profile: $profile" ;; esac
+      "$VENV/bin/python" - "$CFG/policy.json" "$profile" <<'PY'
+import json, os, sys
+from pathlib import Path
+p=Path(sys.argv[1]); profile=sys.argv[2]
+try: data=json.loads(p.read_text())
+except Exception: data={}
+data["profile"]=profile
+tmp=p.with_suffix(".tmp")
+tmp.write_text(json.dumps(data, indent=2, sort_keys=True)+"\n")
+os.chmod(tmp,0o600); tmp.replace(p)
+PY
+      ok "policy profile: $profile"
+      ;;
+    *) die "policy show|profile PROFILE" ;;
+  esac
+}
+
+node(){
+  local action="$(lower "${1:-list}")"
+  shift || true
+  case "$action" in
+    list)
+      if [[ -s "$CFG/nodes.json" ]]; then cat "$CFG/nodes.json"; else echo '[]'; fi
+      ;;
+    add)
+      local name="${1:?name}" endpoint="${2:?mcp-url}"
+      local token_value=""
+      if [[ "${3:-}" == "--token-env" ]]; then
+        local env_name="${4:?environment variable name}"
+        token_value="${!env_name:-}"
+      elif [[ -n "${3:-}" ]]; then
+        die "use: loopback node add NAME URL [--token-env ENV]"
+      elif [[ -t 0 ]]; then
+        printf 'Bearer token (optional, hidden): ' >&2
+        IFS= read -rs token_value || true
+        printf '\n' >&2
+      fi
+      LOOPBACK_NODE_TOKEN="$token_value" "$VENV/bin/python" - "$CFG/nodes.json" "$CFG/nodes.secrets.json" "$name" "$endpoint" <<'PY'
+import json, os, sys
+from pathlib import Path
+nodes_path = Path(sys.argv[1])
+secrets_path = Path(sys.argv[2])
+name = sys.argv[3]
+url = sys.argv[4]
+try: rows=json.loads(nodes_path.read_text())
+except Exception: rows=[]
+rows=[n for n in rows if n.get("name") != name]
+rows.append({"name":name,"url":url.rstrip("/"),"enabled":True,"description":""})
+nodes_path.write_text(json.dumps(rows,indent=2,sort_keys=True)+"\n"); os.chmod(nodes_path,0o600)
+token=os.environ.get("LOOPBACK_NODE_TOKEN","")
+if token:
+    try: sec=json.loads(secrets_path.read_text())
+    except Exception: sec={}
+    sec[name]=token
+    secrets_path.write_text(json.dumps(sec,indent=2)+"\n"); os.chmod(secrets_path,0o600)
+PY
+      unset LOOPBACK_NODE_TOKEN
+      ok "node added: $name"
+      ;;
+    remove|rm)
+      local name="${1:?name}"
+      "$VENV/bin/python" - "$CFG/nodes.json" "$CFG/nodes.secrets.json" "$name" <<'PY'
+import json, os, sys
+from pathlib import Path
+np,sp,name=Path(sys.argv[1]),Path(sys.argv[2]),sys.argv[3]
+try: rows=json.loads(np.read_text())
+except Exception: rows=[]
+np.write_text(json.dumps([n for n in rows if n.get("name") != name],indent=2)+"\n"); os.chmod(np,0o600)
+try: sec=json.loads(sp.read_text())
+except Exception: sec={}
+sec.pop(name,None)
+sp.write_text(json.dumps(sec,indent=2)+"\n"); os.chmod(sp,0o600)
+PY
+      ok "node removed: $name"
+      ;;
+    *) die "node list|add NAME URL [--token-env ENV]|remove NAME" ;;
+  esac
+}
+
 help(){
 cat <<'EOF'
 LOOPBACK
@@ -277,13 +381,18 @@ LOOPBACK
   loopback url
   loopback token
   loopback rotate-token
+  loopback dashboard
+  loopback policy show|profile PROFILE
+  loopback node list|add|remove
   loopback config list|get|set
   loopback autostart on|off|status
   loopback help
 
-Runtime MCP tools in the standard installer:
-  read_file, write_file, list_dir, patch_file, search_text,
-  tail_file, git_info, diagnostics, machine_info
+Runtime MCP tools:
+  Files: read_file, write_file, list_dir, patch_file, search_text, tail_file
+  Shell: execute, job_start/list/output/stop, terminal_start/write/read/resize/close
+  System: process_list, process_kill, git_info, diagnostics, machine_info
+  Policy/Fleet: policy_status, node_list, node_call
 
 The development machine may enable additional locally managed trusted tools.
 EOF
@@ -300,6 +409,9 @@ case "$cmd" in
   url) url ;;
   token) token ;;
   rotate-token|rotatetoken) rotate_token ;;
+  dashboard) dashboard ;;
+  policy) policy "$@" ;;
+  node|nodes) node "$@" ;;
   config) config "$@" ;;
   autostart) autostart "$@" ;;
   help|-h|--help) help ;;

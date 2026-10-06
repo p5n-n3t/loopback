@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "codex/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile
+        run: python -m py_compile runtime/*.py
+      - name: Bash syntax
+        run: bash -n install.sh bin/loopback
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Build portable plugin package
+        run: |
+          python scripts/build_plugin.py --mcp-url https://loopback.example.com/mcp --output /tmp/loopback-plugin.zip
+          python - <<'PY'
+          import json, zipfile
+          p="/tmp/loopback-plugin.zip"
+          with zipfile.ZipFile(p) as z:
+              names=set(z.namelist())
+              assert {"plugin.json","mcp.json","skills/loopback/SKILL.md"} <= names
+              plugin=json.loads(z.read("plugin.json"))
+              mcp=json.loads(z.read("mcp.json"))
+              assert plugin["name"] == "loopback"
+              assert mcp["mcpServers"]["loopback"]["url"] == "https://loopback.example.com/mcp"
+          PY
