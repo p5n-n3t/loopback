@@ -11,6 +11,8 @@ VENV="$CFG/venv"
 TOKEN="$CFG/token"
 SERVER="$CFG/server.py"
 TUNNEL_PID="$CFG/tunnel.pid"
+POLICY="$CFG/policy.json"
+NODES="$CFG/nodes.json"
 
 [[ -f "$CONF" ]] || { echo "Loopback is not installed. Run ./install.sh"; exit 1; }
 # shellcheck disable=SC1090
@@ -47,11 +49,10 @@ start_server(){
   export LOOPBACK_COMMAND_TIMEOUT="$LOOPBACK_TIMEOUT"
   export LOOPBACK_MAX_OUTPUT_BYTES="$LOOPBACK_MAX_OUTPUT_BYTES"
   export LOOPBACK_ACCESS_MODE="${LOOPBACK_ACCESS_MODE:-standard}"
+  export LOOPBACK_INGRESS="${LOOPBACK_INGRESS:-local}"
+  export LOOPBACK_SHELL="${LOOPBACK_SHELL:-${SHELL:-/bin/sh}}"
   : > "$LOG"
-  nohup "$VENV/bin/python" -m uvicorn server:app --app-dir "$CFG" \
-    --host 127.0.0.1 --port "$LOOPBACK_PORT" \
-    --proxy-headers --forwarded-allow-ips=127.0.0.1 \
-    --log-level info >"$LOG" 2>&1 &
+  nohup "$VENV/bin/python" -m uvicorn server:app --app-dir "$CFG"     --host 127.0.0.1 --port "$LOOPBACK_PORT"     --proxy-headers --forwarded-allow-ips=127.0.0.1     --log-level info >"$LOG" 2>&1 &
   echo $! > "$PID"
   for _ in $(seq 1 $((LOOPBACK_STARTUP_TIMEOUT*4))); do
     curl -fsS "http://127.0.0.1:$LOOPBACK_PORT/healthz" >/dev/null 2>&1 && return 0
@@ -62,7 +63,7 @@ start_server(){
 }
 
 start_cloudflare(){
-  [[ -x "$(command -v cloudflared || true)" ]] || die "cloudflared is not installed"
+  command -v cloudflared >/dev/null 2>&1 || die "cloudflared is not installed"
   local cf_log="$CFG/cloudflared.log"
   if [[ -n "${LOOPBACK_CLOUDFLARE_TOKEN_FILE:-}" && -s "$LOOPBACK_CLOUDFLARE_TOKEN_FILE" ]]; then
     nohup cloudflared tunnel run --token-file "$LOOPBACK_CLOUDFLARE_TOKEN_FILE" >"$cf_log" 2>&1 &
@@ -114,18 +115,15 @@ up(){
   start_server
   start_ingress
   ok "Loopback is up"
-  printf '  local:  http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
+  printf '  local:      http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
+  printf '  dashboard: http://127.0.0.1:%s/admin\n' "$LOOPBACK_PORT"
   if [[ "${LOOPBACK_INGRESS:-local}" != "local" ]]; then
-    printf '  public: https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
+    printf '  public:     https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
+    printf '  admin:      https://%s/admin\n' "$LOOPBACK_PUBLIC_HOST"
   fi
 }
 
-down(){
-  stop_ingress
-  stop_server
-  ok "Loopback is down"
-}
-
+down(){ stop_ingress; stop_server; ok "Loopback is down"; }
 restart(){ down || true; up; }
 
 status(){
@@ -133,20 +131,27 @@ status(){
   [[ -s "$PID" ]] && p="$(cat "$PID" 2>/dev/null || true)"
   owned_server "$p" && state=UP || true
   printf 'loopback: %s%s\n' "$state" "${p:+ (PID $p)}"
-  printf '  profile: %s\n' "${LOOPBACK_ACCESS_MODE:-standard}"
-  printf '  ingress: %s\n' "${LOOPBACK_INGRESS:-local}"
-  printf '  local:   http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
-  [[ "${LOOPBACK_INGRESS:-local}" == "local" ]] || printf '  public:  https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
-  printf '  timeout: %ss\n' "$LOOPBACK_TIMEOUT"
-  printf '  maxout:  %s bytes\n' "$LOOPBACK_MAX_OUTPUT_BYTES"
+  printf '  profile:   %s\n' "$(policy_profile 2>/dev/null || printf '%s' "${LOOPBACK_ACCESS_MODE:-standard}")"
+  printf '  ingress:   %s\n' "${LOOPBACK_INGRESS:-local}"
+  printf '  local:     http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
+  printf '  dashboard: http://127.0.0.1:%s/admin\n' "$LOOPBACK_PORT"
+  [[ "${LOOPBACK_INGRESS:-local}" == "local" ]] || {
+    printf '  public:    https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
+    printf '  admin:     https://%s/admin\n' "$LOOPBACK_PUBLIC_HOST"
+  }
+  printf '  timeout:   %ss\n' "$LOOPBACK_TIMEOUT"
+  printf '  maxout:    %s bytes\n' "$LOOPBACK_MAX_OUTPUT_BYTES"
 }
 
 doctor(){
   echo "== Loopback doctor =="
   [[ -x "$VENV/bin/python" ]] && ok "python venv" || echo "✗ python venv"
   [[ -f "$SERVER" ]] && ok "server runtime" || echo "✗ server runtime"
+  [[ -f "$CFG/policy.py" && -f "$CFG/jobs.py" && -f "$CFG/nodes.py" ]] && ok "v3 runtime modules" || echo "✗ v3 runtime modules"
   [[ -s "$TOKEN" ]] && ok "auth token" || echo "✗ auth token"
   command -v git >/dev/null 2>&1 && ok "git" || echo "• git not found"
+  command -v ssh >/dev/null 2>&1 && ok "ssh fleet transport" || echo "• ssh not found"
+  "$VENV/bin/python" -c 'import psutil' >/dev/null 2>&1 && ok "process telemetry" || echo "✗ psutil"
   case "$(lower "${LOOPBACK_INGRESS:-local}")" in
     cloudflare) command -v cloudflared >/dev/null 2>&1 && ok "cloudflared" || echo "✗ cloudflared" ;;
     tailscale) command -v tailscale >/dev/null 2>&1 && ok "tailscale" || echo "✗ tailscale" ;;
@@ -170,6 +175,14 @@ url(){
   fi
 }
 
+dashboard(){
+  if [[ "${LOOPBACK_INGRESS:-local}" == "local" ]]; then
+    printf 'http://127.0.0.1:%s/admin\n' "$LOOPBACK_PORT"
+  else
+    printf 'https://%s/admin\n' "$LOOPBACK_PUBLIC_HOST"
+  fi
+}
+
 token(){ cat "$TOKEN"; echo; }
 
 rotate_token(){
@@ -180,12 +193,11 @@ print(secrets.token_hex(32))
 PY
   chmod 600 "$TOKEN"
   restart
-  ok "token rotated"
+  ok "token rotated; OAuth/admin sessions were invalidated by restart"
 }
 
 config(){
-  local action="$(lower "${1:-list}")"
-  shift || true
+  local action="$(lower "${1:-list}")"; shift || true
   case "$action" in
     list) cat "$CONF" ;;
     get) grep -E "^${1:?key}=" "$CONF" || true ;;
@@ -207,10 +219,93 @@ p.write_text("\n".join(out)+"\n")
 PY
       ok "saved $key"
       ;;
-    *) die "Config List|Get KEY|Set KEY VALUE" ;;
+    *) die "config list|get KEY|set KEY VALUE" ;;
   esac
 }
 
+policy_profile(){
+  [[ -s "$POLICY" ]] || { echo "standard"; return; }
+  python3 - "$POLICY" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1])).get("profile","standard"))
+PY
+}
+
+policy(){
+  local action="$(lower "${1:-show}")"; shift || true
+  case "$action" in
+    show|list)
+      [[ -s "$POLICY" ]] && cat "$POLICY" || echo '{"profile":"standard"}'
+      ;;
+    profile)
+      local value="${1:?read-only|standard|trusted}"
+      case "$value" in read-only|standard|trusted) ;; *) die "profile must be read-only, standard, or trusted" ;; esac
+      "$VENV/bin/python" - "$CFG" "$value" <<'PY'
+import sys
+sys.path.insert(0,sys.argv[1])
+from policy import Policy
+print(Policy().set_profile(sys.argv[2]))
+PY
+      ok "policy profile set to $value"
+      ;;
+    tool)
+      local name="${1:?tool name}" state="$(lower "${2:?on|off}")"
+      [[ "$state" == on || "$state" == off ]] || die "tool state must be on or off"
+      "$VENV/bin/python" - "$CFG" "$name" "$state" <<'PY'
+import sys
+sys.path.insert(0,sys.argv[1])
+from policy import Policy
+Policy().set_tool(sys.argv[2],sys.argv[3]=="on")
+PY
+      ok "$name $state"
+      ;;
+    *) die "policy show|profile PROFILE|tool NAME on|off" ;;
+  esac
+}
+
+node(){
+  local action="$(lower "${1:-list}")"; shift || true
+  case "$action" in
+    list)
+      "$VENV/bin/python" - "$CFG" <<'PY'
+import json,sys
+sys.path.insert(0,sys.argv[1])
+from nodes import NodeRegistry
+print(json.dumps(NodeRegistry().list(),indent=2))
+PY
+      ;;
+    add)
+      local name="${1:?name}" target="${2:?ssh target}"
+      "$VENV/bin/python" - "$CFG" "$name" "$target" <<'PY'
+import json,sys
+sys.path.insert(0,sys.argv[1])
+from nodes import NodeRegistry
+print(json.dumps(NodeRegistry().upsert({"name":sys.argv[2],"transport":"ssh","target":sys.argv[3]}),indent=2))
+PY
+      ok "node $name saved"
+      ;;
+    remove)
+      local name="${1:?name}"
+      "$VENV/bin/python" - "$CFG" "$name" <<'PY'
+import sys
+sys.path.insert(0,sys.argv[1])
+from nodes import NodeRegistry
+NodeRegistry().remove(sys.argv[2])
+PY
+      ok "node $name removed"
+      ;;
+    health)
+      local name="${1:?name}"
+      "$VENV/bin/python" - "$CFG" "$name" "${LOOPBACK_SHELL:-${SHELL:-/bin/sh}}" <<'PY'
+import json,sys
+sys.path.insert(0,sys.argv[1])
+from nodes import NodeRegistry
+print(json.dumps(NodeRegistry().health(sys.argv[2],sys.argv[3]),indent=2))
+PY
+      ;;
+    *) die "node list|add NAME SSH_TARGET|remove NAME|health NAME" ;;
+  esac
+}
 
 autostart(){
   local action="$(lower "${1:-status}")"
@@ -239,10 +334,8 @@ WantedBy=default.target
 EOF
       systemctl --user daemon-reload
       systemctl --user enable --now loopback.service
-      if command -v loginctl >/dev/null 2>&1; then
-        if sudo -n true >/dev/null 2>&1; then
-          sudo loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
-        fi
+      if command -v loginctl >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        sudo loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
       fi
       ok "autostart enabled"
       ;;
@@ -253,11 +346,7 @@ EOF
       ok "autostart disabled"
       ;;
     status)
-      if systemctl --user is-enabled --quiet loopback.service 2>/dev/null; then
-        echo "autostart: enabled"
-      else
-        echo "autostart: disabled"
-      fi
+      if systemctl --user is-enabled --quiet loopback.service 2>/dev/null; then echo "autostart: enabled"; else echo "autostart: disabled"; fi
       systemctl --user status loopback.service --no-pager 2>/dev/null || true
       ;;
     *) die "autostart on|off|status" ;;
@@ -268,24 +357,42 @@ help(){
 cat <<'EOF'
 LOOPBACK
 
-  loopback up
-  loopback down
-  loopback restart
-  loopback status
-  loopback doctor
+Lifecycle
+  loopback up|down|restart|status|doctor
   loopback logs [N|-f]
   loopback url
+  loopback dashboard
+  loopback autostart on|off|status
+
+Authentication
   loopback token
   loopback rotate-token
+
+Policy
+  loopback policy show
+  loopback policy profile read-only|standard|trusted
+  loopback policy tool NAME on|off
+
+Fleet
+  loopback node list
+  loopback node add NAME SSH_TARGET
+  loopback node remove NAME
+  loopback node health NAME
+
+Configuration
   loopback config list|get|set
-  loopback autostart on|off|status
-  loopback help
 
-Runtime MCP tools in the standard installer:
-  read_file, write_file, list_dir, patch_file, search_text,
-  tail_file, git_info, diagnostics, machine_info
+MCP capabilities
+  Files: read/write/list/patch/search/tail
+  Git: git_info
+  Jobs: command_run, command_start, job_list/output/stop, task_run
+  Terminal: terminal_start/list/write/read/close
+  Processes: process_list/info/kill
+  Fleet: node_list/health/command/copy
+  Observability: system_snapshot, diagnostics, machine_info, policy_status
 
-The development machine may enable additional locally managed trusted tools.
+Powerful tools are present but disabled by standard/read-only policy unless
+the operator explicitly enables them or chooses the trusted profile.
 EOF
 }
 
@@ -298,9 +405,12 @@ case "$cmd" in
   doctor) doctor "$@" ;;
   logs) logs "$@" ;;
   url) url ;;
+  dashboard) dashboard ;;
   token) token ;;
   rotate-token|rotatetoken) rotate_token ;;
   config) config "$@" ;;
+  policy) policy "$@" ;;
+  node|nodes) node "$@" ;;
   autostart) autostart "$@" ;;
   help|-h|--help) help ;;
   *) die "unknown command: $cmd" ;;
