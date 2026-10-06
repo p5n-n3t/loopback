@@ -2,19 +2,26 @@
 
 ## Lifecycle
 
-`loopback up` starts the local MCP server and then the configured ingress.
+```bash
+loopback up
+loopback down
+loopback restart
+loopback status
+loopback doctor
+```
 
-`loopback down` stops ingress first and then stops the MCP server.
+`loopback up` starts the localhost MCP runtime and then the configured ingress.
 
-`loopback restart` performs a clean down/up cycle.
+## Endpoints
 
-`loopback status` reports profile, ingress, endpoint, timeout, and output limits.
+```bash
+loopback url
+loopback dashboard
+```
 
-## Boot persistence
+The MCP path is always `/mcp`. The operator dashboard is `/admin`.
 
-Fresh installs enable user-systemd autostart when systemd is available.
-
-Manage it with:
+## Autostart
 
 ```bash
 loopback autostart on
@@ -22,81 +29,61 @@ loopback autostart off
 loopback autostart status
 ```
 
-On Linux, Loopback also enables user lingering when passwordless sudo is available so the user service can start at boot without an interactive login.
+On supported Linux systems, the installer can enable a user systemd unit and user lingering.
 
-Pass `--no-autostart` to `install.sh` if you want a session-only installation.
-
-## Diagnostics
-
-Run:
-
-```bash
-loopback doctor
-```
-
-It checks the Python environment, runtime file, auth token, Git, the chosen ingress dependency, and local/public health endpoints.
-
-For server logs:
+## Logs
 
 ```bash
 loopback logs 200
 loopback logs -f
 ```
 
-## Endpoint
+Structured audit events are separate from the server log:
 
-Print the active MCP URL with:
-
-```bash
-loopback url
+```text
+~/.config/loopback/audit.jsonl
 ```
-
-The MCP path is always `/mcp`.
 
 ## Credentials
 
-Print the current local token only when you explicitly need it:
-
 ```bash
 loopback token
-```
-
-Rotate it with:
-
-```bash
 loopback rotate-token
 ```
 
-Rotation restarts the service so the new credential is active immediately.
+Rotating the machine token restarts the service and invalidates in-memory OAuth/admin sessions.
 
-## Configuration
-
-Show configuration:
+## Policy
 
 ```bash
-loopback config list
+loopback policy show
+loopback policy profile read-only
+loopback policy profile standard
+loopback policy profile trusted
+loopback policy tool process_kill off
 ```
 
-Read one value:
+See [POLICY.md](POLICY.md).
+
+## Fleet
 
 ```bash
-loopback config get LOOPBACK_PORT
+loopback node list
+loopback node add ora3 ora3
+loopback node health ora3
+loopback node remove ora3
 ```
 
-Set one value:
+See [GATEWAY.md](GATEWAY.md).
+
+## Plugin package
 
 ```bash
-loopback config set LOOPBACK_TIMEOUT 300
+loopback plugin package ~/Desktop/loopback-plugin.zip
 ```
 
-Restart Loopback after settings that affect the running server or transport.
+Requires a public HTTPS active Loopback URL.
 
-## Files
+## Runtime state
 
-Generated runtime state is under:
-
-```
-~/.config/loopback/
-```
-
-The repository itself should remain free of machine credentials and generated runtime state.
+Generated state lives under `~/.config/loopback`. The source checkout can be moved or deleted after installation because the installer copies the runtime into the config directory.
