@@ -22,6 +22,7 @@ import jwt
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.server import MCPServer
+from mcp.server.mcpserver import Image
 from mcp.types import ToolAnnotations
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
@@ -31,6 +32,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from audit import AuditStore
 from browser import BrowserAdapter
 from dashboard import render_dashboard, render_login
+from desktop import DesktopAdapter
 from documents import DocumentTools
 from fleet import FleetStore
 from jobs import JobManager, TerminalManager
@@ -62,6 +64,7 @@ TERMINALS = TerminalManager(SHELL)
 FLEET = FleetStore(CFG)
 BROWSER = BrowserAdapter()
 DOCUMENTS = DocumentTools()
+DESKTOP = DesktopAdapter()
 _ADMIN_SESSIONS: dict[str, float] = {}
 
 
@@ -754,6 +757,68 @@ def pdf_extract_pages(path: str, pages: list[int], output_path: str) -> dict[str
     return DOCUMENTS.pdf_extract_pages(src, pages, dst)
 
 
+
+
+# ---------------------------------------------------------------------------
+# Optional native desktop automation (Linux/X11).
+# ---------------------------------------------------------------------------
+
+@mcp.tool(title="Native desktop status", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
+def desktop_status() -> dict[str, Any]:
+    """Report whether native desktop automation is available on this node."""
+    return {**DESKTOP.status(), "enabled_by_policy": bool(POLICY.data.get("allow_desktop", False))}
+
+
+@mcp.tool(title="List desktop windows", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=False, open_world_hint=False))
+def desktop_windows(limit: int = 200) -> dict[str, Any]:
+    """List visible desktop windows on a Linux/X11 node."""
+    POLICY.check_desktop()
+    return DESKTOP.windows(limit)
+
+
+@mcp.tool(title="Capture desktop screenshot", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=False, open_world_hint=False))
+def desktop_screenshot(output_path: str | None = None) -> Image:
+    """Capture the desktop and return it as MCP image content."""
+    POLICY.check_desktop()
+    if output_path:
+        dst = POLICY.check_path(output_path, write=True)
+    else:
+        dst = POLICY.check_path(
+            CFG / "screenshots" / f"desktop-{int(time.time())}.png",
+            write=True,
+        )
+    path = DESKTOP.screenshot(dst)
+    return Image(path=path)
+
+
+@mcp.tool(title="Activate desktop window", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
+def desktop_activate_window(window_id: str) -> dict[str, Any]:
+    """Activate one visible desktop window by its X11 window id."""
+    POLICY.check_desktop()
+    return DESKTOP.activate_window(window_id)
+
+
+@mcp.tool(title="Click desktop coordinates", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
+def desktop_click(x: int, y: int, button: int = 1) -> dict[str, Any]:
+    """Move the pointer and click desktop coordinates."""
+    POLICY.check_desktop()
+    return DESKTOP.click(x, y, button)
+
+
+@mcp.tool(title="Type desktop text", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
+def desktop_type(text: str, delay_ms: int = 10) -> dict[str, Any]:
+    """Type text into the currently focused desktop application."""
+    POLICY.check_desktop()
+    return DESKTOP.type_text(text, delay_ms)
+
+
+@mcp.tool(title="Send desktop key", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
+def desktop_key(keys: str) -> dict[str, Any]:
+    """Send a constrained xdotool key expression to the focused application."""
+    POLICY.check_desktop()
+    return DESKTOP.key(keys)
+
+
 # ---------------------------------------------------------------------------
 # OAuth 2.1-style authorization-code + PKCE facade.
 #
@@ -1118,6 +1183,7 @@ async def admin_overview(request: Request) -> Response:
         "system": _system_snapshot(),
         "policy": dict(POLICY.data),
         "browser": BROWSER.status(),
+        "desktop": DESKTOP.status(),
         "jobs": JOBS.list(),
         "terminals": TERMINALS.list(),
         "approvals": POLICY.pending(),
@@ -1137,7 +1203,7 @@ async def admin_policy(request: Request) -> Response:
     body = await request.json()
     allowed_keys = {
         "profile", "allowed_roots", "denied_roots", "allow_shell",
-        "allow_process_control", "allow_fleet", "allow_browser",
+        "allow_process_control", "allow_fleet", "allow_browser", "allow_desktop",
         "allowed_tools", "denied_tools", "approval_ttl_seconds",
         "require_approval_patterns", "deny_command_patterns",
     }
