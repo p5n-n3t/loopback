@@ -29,7 +29,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from audit import AuditStore
+from browser import BrowserAdapter
 from dashboard import render_dashboard, render_login
+from documents import DocumentTools
 from fleet import FleetStore
 from jobs import JobManager, TerminalManager
 from policy import PolicyError, PolicyStore
@@ -58,6 +60,8 @@ AUDIT = AuditStore(CFG)
 JOBS = JobManager(CFG, SHELL)
 TERMINALS = TerminalManager(SHELL)
 FLEET = FleetStore(CFG)
+BROWSER = BrowserAdapter()
+DOCUMENTS = DocumentTools()
 _ADMIN_SESSIONS: dict[str, float] = {}
 
 
@@ -640,6 +644,116 @@ async def node_diagnostics(node: str, timeout: int = 30) -> dict[str, Any]:
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# Optional browser and document capabilities.
+# ---------------------------------------------------------------------------
+
+@mcp.tool(title="Browser adapter status", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
+def browser_status() -> dict[str, Any]:
+    """Report whether the optional structured browser adapter is available."""
+    return {**BROWSER.status(), "enabled_by_policy": bool(POLICY.data.get("allow_browser", False))}
+
+
+@mcp.tool(title="Open browser URL", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True))
+def browser_open(url: str, session: str = "loopback") -> dict[str, Any]:
+    """Open an HTTPS URL in the optional browser automation session."""
+    POLICY.check_browser()
+    return BROWSER.open(url, session)
+
+
+@mcp.tool(title="Inspect browser page", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=False, open_world_hint=True))
+def browser_snapshot(session: str = "loopback", interactive_only: bool = True) -> dict[str, Any]:
+    """Return an accessibility snapshot with element references from the browser."""
+    POLICY.check_browser()
+    return BROWSER.snapshot(session, interactive_only)
+
+
+@mcp.tool(title="Click browser element", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True))
+def browser_click(ref: str, session: str = "loopback") -> dict[str, Any]:
+    """Click one element reference returned by browser_snapshot."""
+    POLICY.check_browser()
+    return BROWSER.click(ref, session)
+
+
+@mcp.tool(title="Fill browser field", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True))
+def browser_fill(ref: str, text: str, session: str = "loopback") -> dict[str, Any]:
+    """Fill one browser field reference with text."""
+    POLICY.check_browser()
+    return BROWSER.fill(ref, text, session)
+
+
+@mcp.tool(title="Get browser URL", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True))
+def browser_get_url(session: str = "loopback") -> dict[str, Any]:
+    """Return the current URL for a browser automation session."""
+    POLICY.check_browser()
+    return BROWSER.url(session)
+
+
+@mcp.tool(title="Close browser session", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True))
+def browser_close(session: str = "loopback") -> dict[str, Any]:
+    """Close an optional browser automation session."""
+    POLICY.check_browser()
+    return BROWSER.close(session)
+
+
+@mcp.tool(title="Read Word document", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
+def docx_text(path: str) -> dict[str, Any]:
+    """Extract paragraphs and table text from a DOCX file."""
+    return DOCUMENTS.docx_text(POLICY.check_path(path, write=False))
+
+
+@mcp.tool(title="Replace Word text", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
+def docx_replace_text(path: str, old_text: str, new_text: str, output_path: str | None = None) -> dict[str, Any]:
+    """Replace text in a DOCX and save a new or explicitly selected output file."""
+    src = POLICY.check_path(path, write=False)
+    dst = POLICY.check_path(output_path or str(src.with_name(src.stem + ".loopback.docx")), write=True)
+    return DOCUMENTS.docx_replace_text(src, old_text, new_text, dst)
+
+
+@mcp.tool(title="Read Excel range", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
+def xlsx_read_range(path: str, sheet: str, cell_range: str) -> dict[str, Any]:
+    """Read values/formulas from a rectangular XLSX range."""
+    return DOCUMENTS.xlsx_read_range(POLICY.check_path(path, write=False), sheet, cell_range)
+
+
+@mcp.tool(title="Write Excel range", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False))
+def xlsx_write_range(
+    path: str,
+    sheet: str,
+    start_cell: str,
+    values: list[list[Any]],
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Write a 2D value array to an XLSX range and save an output workbook."""
+    src = POLICY.check_path(path, write=False)
+    dst = POLICY.check_path(output_path or str(src.with_name(src.stem + ".loopback.xlsx")), write=True)
+    return DOCUMENTS.xlsx_write_range(src, sheet, start_cell, values, dst)
+
+
+@mcp.tool(title="Read PDF text", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False))
+def pdf_text(path: str, start_page: int = 1, max_pages: int = 20) -> dict[str, Any]:
+    """Extract text from a bounded PDF page range."""
+    return DOCUMENTS.pdf_text(POLICY.check_path(path, write=False), start_page, max_pages)
+
+
+@mcp.tool(title="Merge PDFs", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
+def pdf_merge(paths: list[str], output_path: str) -> dict[str, Any]:
+    """Merge PDF files in order into a new output PDF."""
+    srcs = [POLICY.check_path(path, write=False) for path in paths]
+    dst = POLICY.check_path(output_path, write=True)
+    return DOCUMENTS.pdf_merge(srcs, dst)
+
+
+@mcp.tool(title="Extract PDF pages", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
+def pdf_extract_pages(path: str, pages: list[int], output_path: str) -> dict[str, Any]:
+    """Create a new PDF containing selected 1-based pages."""
+    src = POLICY.check_path(path, write=False)
+    dst = POLICY.check_path(output_path, write=True)
+    return DOCUMENTS.pdf_extract_pages(src, pages, dst)
+
+
 # ---------------------------------------------------------------------------
 # OAuth 2.1-style authorization-code + PKCE facade.
 #
@@ -1022,7 +1136,8 @@ async def admin_policy(request: Request) -> Response:
     body = await request.json()
     allowed_keys = {
         "profile", "allowed_roots", "denied_roots", "allow_shell",
-        "allow_process_control", "allow_fleet", "approval_ttl_seconds",
+        "allow_process_control", "allow_fleet", "allow_browser",
+        "allowed_tools", "denied_tools", "approval_ttl_seconds",
         "require_approval_patterns", "deny_command_patterns",
     }
     updates = {k: v for k, v in body.items() if k in allowed_keys}
@@ -1141,6 +1256,61 @@ inner = mcp.streamable_http_app(
 )
 
 
+class PolicyGate:
+    """Enforce per-tool allow/deny policy at the MCP JSON-RPC boundary."""
+
+    def __init__(self, wrapped):
+        self.wrapped = wrapped
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("path") != "/mcp" or scope.get("method") != "POST":
+            return await self.wrapped(scope, receive, send)
+
+        chunks: list[bytes] = []
+        more = True
+        while more:
+            message = await receive()
+            if message.get("type") != "http.request":
+                continue
+            chunks.append(message.get("body", b""))
+            more = bool(message.get("more_body", False))
+        body = b"".join(chunks)
+        used = False
+
+        async def replay_receive():
+            nonlocal used
+            if not used:
+                used = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
+
+        try:
+            payload = json.loads(body.decode("utf-8")) if body else {}
+            if isinstance(payload, dict) and payload.get("method") == "tools/call":
+                params = payload.get("params") or {}
+                if isinstance(params, dict):
+                    POLICY.check_tool(str(params.get("name") or ""))
+        except PolicyError as exc:
+            payload_id = None
+            try:
+                payload_id = json.loads(body.decode("utf-8")).get("id")
+            except Exception:
+                pass
+            response = JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload_id,
+                    "error": {"code": -32001, "message": str(exc)},
+                },
+                status_code=200,
+            )
+            return await response(scope, receive, send)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            pass
+
+        return await self.wrapped(scope, replay_receive, send)
+
+
 class AuditGate:
     """Record MCP activity without storing bearer credentials or request bodies."""
 
@@ -1211,7 +1381,7 @@ class AuditGate:
 
 # Browser-based MCP clients need the MCP headers exposed.
 cors = CORSMiddleware(
-    AuditGate(inner),
+    AuditGate(PolicyGate(inner)),
     allow_origins=[
         f"https://{PUBLIC_HOST}",
         "https://www.perplexity.ai",
