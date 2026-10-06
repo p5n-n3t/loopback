@@ -58,19 +58,19 @@ PROFILE_TOOLS: dict[str, dict[str, bool]] = {
         "command_run": False, "command_start": False, "task_run": False,
         "terminal_start": False, "terminal_write": False, "terminal_read": False,
         "terminal_close": False, "process_list": True, "process_info": True,
-        "process_kill": False, "node_command": False,
+        "process_kill": False, "node_command": False, "browser_control": False,
     },
     "standard": {
         "command_run": False, "command_start": False, "task_run": False,
         "terminal_start": False, "terminal_write": False, "terminal_read": True,
         "terminal_close": False, "process_list": True, "process_info": True,
-        "process_kill": False, "node_command": False,
+        "process_kill": False, "node_command": False, "browser_control": False,
     },
     "trusted": {
         "command_run": True, "command_start": True, "task_run": True,
         "terminal_start": True, "terminal_write": True, "terminal_read": True,
         "terminal_close": True, "process_list": True, "process_info": True,
-        "process_kill": True, "node_command": True,
+        "process_kill": True, "node_command": True, "browser_control": True,
     },
 }
 
