@@ -4,4 +4,4 @@ starlette>=0.52,<1
 PyJWT>=2.13,<3
 python-multipart>=0.0.20,<1
 cryptography>=45,<51
-httpx>=0.28,<1\n
+httpx>=0.28,<1
