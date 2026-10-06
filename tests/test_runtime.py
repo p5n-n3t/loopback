@@ -20,6 +20,8 @@ from policy import ApprovalStore, Policy
 from jobs import JobManager, TerminalManager
 from nodes import NodeRegistry
 from metrics import host_metrics, process_info, process_list
+from browser import BrowserController
+from plugin_packager import build as build_plugin
 
 
 class PolicyTests(unittest.TestCase):
@@ -112,6 +114,36 @@ class NodeTests(unittest.TestCase):
         self.registry.remove("ora3")
         with self.assertRaises(KeyError):
             self.registry.get("ora3")
+
+
+class BrowserTests(unittest.TestCase):
+    def test_browser_status_is_structured(self) -> None:
+        browser = BrowserController()
+        status = browser.status()
+        self.assertIn("available", status)
+        self.assertIn("command", status)
+
+
+class PluginPackageTests(unittest.TestCase):
+    def test_portable_plugin_package(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "loopback.zip"
+            build_plugin("https://loopback.example.com/mcp", out, "3.0.0")
+            import zipfile
+            with zipfile.ZipFile(out) as archive:
+                names = set(archive.namelist())
+                self.assertIn("plugin.json", names)
+                self.assertIn("mcp.json", names)
+                self.assertIn("skills/loopback/SKILL.md", names)
+                manifest = json.loads(archive.read("plugin.json"))
+                self.assertEqual(manifest["name"], "loopback")
+                mcp = json.loads(archive.read("mcp.json"))
+                self.assertEqual(mcp["mcpServers"]["loopback"]["url"], "https://loopback.example.com/mcp")
+
+    def test_plugin_rejects_non_https(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(ValueError):
+                build_plugin("http://127.0.0.1:2026/mcp", Path(td) / "bad.zip", "3.0.0")
 
 
 class MetricsTests(unittest.TestCase):
