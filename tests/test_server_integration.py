@@ -80,6 +80,20 @@ class ServerImportTests(unittest.TestCase):
             "node_read_file",
             "node_execute",
             "node_diagnostics",
+            "browser_status",
+            "browser_open",
+            "browser_snapshot",
+            "browser_click",
+            "browser_fill",
+            "browser_get_url",
+            "browser_close",
+            "docx_text",
+            "docx_replace_text",
+            "xlsx_read_range",
+            "xlsx_write_range",
+            "pdf_text",
+            "pdf_merge",
+            "pdf_extract_pages",
         }
         # MCPServer exposes registered tools through its internal tool manager.
         manager = getattr(self.server.mcp, "_tool_manager", None)
