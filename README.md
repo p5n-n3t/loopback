@@ -39,11 +39,14 @@ Loopback on 127.0.0.1
   OAuth + PKCE for clients that expect OAuth.
 - **Real terminal workflows** — one-shot commands, background jobs with
   incremental output, and persistent PTYs.
-- **Machine-side policy** — filesystem boundaries, policy profiles, hard command
-  denies, and bounded approval grants.
+- **Machine-side policy** — filesystem boundaries, per-tool allow/deny rules,
+  policy profiles, hard command denies, and bounded approval grants.
 - **Observability** — authenticated dashboard plus local SQLite audit history.
 - **Fleet capable** — one connector can route MCP calls to registered Loopback
   nodes, while each node retains its own identity and credential.
+- **Document operations** — structured DOCX, XLSX, and PDF reading/editing helpers.
+- **Optional browser automation** — narrow open/snapshot/click/fill tools through
+  an installed `agent-browser`, disabled by policy by default.
 - **MCP tool annotations** — safe/read-only tools advertise their intent so
   clients can make better confirmation decisions.
 
@@ -105,6 +108,17 @@ https://<host>/admin
   `terminal_close`
 - `process_list`, `process_kill`
 
+### Documents and optional browser
+
+- `docx_text`, `docx_replace_text`
+- `xlsx_read_range`, `xlsx_write_range`
+- `pdf_text`, `pdf_merge`, `pdf_extract_pages`
+- `browser_status`, `browser_open`, `browser_snapshot`, `browser_click`,
+  `browser_fill`, `browser_get_url`, `browser_close`
+
+Browser automation is opt-in and requires the separate `agent-browser`
+executable. It is not silently installed by Loopback.
+
 ### System, policy, and fleet
 
 - `diagnostics`
@@ -112,6 +126,7 @@ https://<host>/admin
 - `policy_status`
 - `node_list`
 - `node_call`
+- `node_read_file`, `node_execute`, `node_diagnostics`
 
 ## Policy profiles
 
