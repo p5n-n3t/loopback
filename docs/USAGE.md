@@ -42,7 +42,8 @@ loopback policy profile read-only
 loopback policy profile locked
 ```
 
-The dashboard exposes the same profile switch plus bounded approval actions.
+The dashboard exposes the same profile switch plus bounded approval actions,
+filesystem boundaries, per-tool allow/deny lists, and the optional browser toggle.
 
 ## Choosing an execution tool
 
@@ -74,6 +75,25 @@ The PTY remains alive across MCP calls.
 
 Use `process_list` for structured process metadata. Use `process_kill` only
 when the intended process and side effect are clear.
+
+## Documents
+
+Structured document tools are available for common machine-side workflows:
+
+- DOCX text extraction and text replacement
+- XLSX range reads and writes
+- PDF text extraction, merge, and page extraction
+
+All paths pass through Loopback's filesystem policy.
+
+## Optional browser automation
+
+`browser_status` reports whether the separate `agent-browser` executable is
+installed. Browser actions are disabled by policy by default.
+
+Enable them intentionally from the dashboard by turning on browser automation.
+The adapter provides structured open/snapshot/click/fill/URL/close operations,
+not arbitrary JavaScript evaluation.
 
 ## Fleet
 
