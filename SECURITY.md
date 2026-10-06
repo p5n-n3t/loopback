@@ -95,6 +95,21 @@ Browser actions can operate authenticated web sessions and therefore deserve the
 same caution as shell/process actions. Keep the capability disabled on headless
 or infrastructure-only nodes that do not need it.
 
+## Native desktop automation
+
+Native desktop control is disabled by default and currently implemented only for
+Linux/X11. Enabling it allows an authenticated agent to interact with the focused
+desktop application through coordinates, text, and key events.
+
+The adapter is capability-detected and requires `xdotool`; window discovery can
+use `wmctrl`; screenshots use an available supported screenshot utility.
+`desktop_screenshot` returns image content through MCP so compatible clients can
+inspect the pixels.
+
+Keep `allow_desktop=false` on servers and machines where GUI automation is not
+needed. Client-side confirmation and Loopback per-tool policy remain independent
+layers.
+
 ## Document operations
 
 DOCX, XLSX, and PDF helpers obey the same filesystem root policy as ordinary file
