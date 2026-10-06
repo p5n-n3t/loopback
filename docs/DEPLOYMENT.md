@@ -1,10 +1,32 @@
 # Deployment
 
-## Headless Cloudflare deployment
+Loopback keeps the origin on `127.0.0.1`. The ingress layer is replaceable.
 
-For servers, CI, and fleet provisioning, Loopback supports a remotely-managed Cloudflare Tunnel token file.
+## Local only
 
-Create and configure the tunnel centrally, place its runtime token in a temporary file on the target host, then run:
+```bash
+./install.sh --non-interactive --ingress local
+```
+
+Useful for development, a private MCP tunnel, or a locally running MCP client.
+
+## Tailscale Funnel
+
+```bash
+./install.sh --ingress tailscale
+```
+
+The installer reuses an existing Tailscale installation when present.
+
+## Cloudflare Tunnel
+
+Interactive:
+
+```bash
+./install.sh --ingress cloudflare --host loopback.example.com
+```
+
+Headless token-file deployment:
 
 ```bash
 ./install.sh \
@@ -15,18 +37,37 @@ Create and configure the tunnel centrally, place its runtime token in a temporar
   --cloudflare-token-file /path/to/token
 ```
 
-The installer copies the token to `~/.config/loopback/cloudflared.token` with mode `0600`. The CLI starts the tunnel using `cloudflared tunnel run --token-file`, so the credential is not placed directly in the process command line.
+The token is copied to `~/.config/loopback/cloudflared.token` with mode `0600`.
 
-The Cloudflare-side tunnel configuration should route the public hostname to:
+The Cloudflare-side route should target:
 
-```
+```text
 http://127.0.0.1:2026
 ```
 
-The MCP connector URL is:
+## Reverse proxy
 
-```
-https://loopback-node.example.com/mcp
+You can manage your own HTTPS proxy instead of Cloudflare/Tailscale. Proxy both `/mcp` and Loopback's OAuth/admin discovery routes to the same localhost origin. Preserve normal forwarding headers and do not add an unauthenticated bypass to `/admin` or `/mcp`.
+
+## Profiles
+
+Install with an explicit policy profile:
+
+```bash
+./install.sh --ingress cloudflare --host loopback.example.com --profile standard
 ```
 
-Each machine should use its own tunnel token. Do not reuse one tunnel token as a fleet-wide credential.
+Use `trusted` only when you intentionally want shell/process/fleet/browser control.
+
+## Upgrade
+
+For a source checkout upgrade:
+
+```bash
+git pull
+./install.sh --non-interactive --ingress <existing-ingress> --host <existing-host>
+```
+
+Before upgrading a production node, keep a copy of `~/.config/loopback`. The installer preserves the existing machine token but refreshes runtime code/dependencies.
+
+A future dedicated `loopback upgrade` command can automate source retrieval while preserving this same state model.
