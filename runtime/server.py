@@ -1116,7 +1116,8 @@ async def admin_overview(request: Request) -> Response:
         return denied
     return JSONResponse({
         "system": _system_snapshot(),
-        "policy": {"profile": POLICY.profile},
+        "policy": dict(POLICY.data),
+        "browser": BROWSER.status(),
         "jobs": JOBS.list(),
         "terminals": TERMINALS.list(),
         "approvals": POLICY.pending(),
