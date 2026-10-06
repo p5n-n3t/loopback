@@ -34,6 +34,8 @@ The dashboard shows:
 - hostname and Loopback uptime
 - system load, memory, disk, and Python version
 - current policy profile
+- allowed/denied filesystem roots and tool lists
+- optional browser-adapter availability/state
 - active background jobs
 - active persistent terminals
 - pending Loopback approval requests
@@ -44,6 +46,8 @@ The dashboard shows:
 It can:
 
 - switch between standard, trusted, read-only, and locked profiles
+- edit allowed/denied roots and allowed/denied MCP tools
+- explicitly enable or disable optional browser automation
 - approve a sensitive Loopback action once or for a bounded number of uses/time
 - stop Loopback background jobs
 - close Loopback PTY sessions

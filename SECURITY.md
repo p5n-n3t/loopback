@@ -46,6 +46,16 @@ AWS, 1Password, and the GitHub CLI hosts file. Customize `allowed_roots` and
 
 A model instruction is not a security boundary; the server-side path check is.
 
+## Per-tool policy
+
+`allowed_tools` and `denied_tools` are enforced at the MCP JSON-RPC boundary
+before a tool reaches the MCP runtime. Use `["*"]` in allowed tools to allow
+all tools except explicit denies, or replace it with an exact allowlist for a
+more constrained connector.
+
+This makes it possible to publish one Loopback endpoint while giving it a narrow
+capability surface, for example file inspection without command execution.
+
 ## Command policy
 
 The standard profile can require a separate Loopback approval for sensitive
@@ -74,6 +84,23 @@ capabilities.
 A sophisticated shell command can still have side effects that a regex policy
 cannot fully understand. Use filesystem boundaries, Unix permissions,
 containers/VMs, and least privilege as additional layers.
+
+## Browser automation
+
+Browser automation is disabled by default. When enabled, the structured browser
+tools require a separately installed `agent-browser` executable. Loopback does
+not expose arbitrary browser JavaScript through this adapter.
+
+Browser actions can operate authenticated web sessions and therefore deserve the
+same caution as shell/process actions. Keep the capability disabled on headless
+or infrastructure-only nodes that do not need it.
+
+## Document operations
+
+DOCX, XLSX, and PDF helpers obey the same filesystem root policy as ordinary file
+tools. Write operations default to a new output file when practical. DOCX text
+replacement that crosses multiple runs may consolidate formatting into the first
+run; use a copy and review the result when formatting fidelity matters.
 
 ## Dashboard
 

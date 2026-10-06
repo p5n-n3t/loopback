@@ -392,7 +392,9 @@ Runtime MCP tools:
   Files: read_file, write_file, list_dir, patch_file, search_text, tail_file
   Shell: execute, job_start/list/output/stop, terminal_start/write/read/resize/close
   System: process_list, process_kill, git_info, diagnostics, machine_info
-  Policy/Fleet: policy_status, node_list, node_call
+  Documents: docx_text/replace, xlsx_read/write_range, pdf_text/merge/extract_pages
+  Browser: browser_status/open/snapshot/click/fill/get_url/close (optional)
+  Policy/Fleet: policy_status, node_list/call/read_file/execute/diagnostics
 
 The development machine may enable additional locally managed trusted tools.
 EOF

@@ -34,7 +34,7 @@ header{{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-
 main{{max-width:1500px;margin:auto;padding:22px}} .grid{{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}} .card{{grid-column:span 3;background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}} .wide{{grid-column:span 6}} .full{{grid-column:1/-1}}
 .label{{font-size:10px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase}} .big{{font-size:24px;font-weight:750;margin-top:7px}} .ok{{color:var(--green)}} .bad{{color:var(--red)}} .cyan{{color:var(--cyan)}}
 table{{width:100%;border-collapse:collapse;margin-top:10px}} th,td{{padding:8px 7px;text-align:left;border-bottom:1px solid #202830;vertical-align:top}} th{{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}} td{{overflow-wrap:anywhere}}
-button,select,input{{font:inherit;border-radius:8px;border:1px solid #34404a;background:#0a0e11;color:#e9eef1;padding:8px 9px}} button{{cursor:pointer}} button.primary{{background:var(--yellow);color:#090909;border-color:var(--yellow);font-weight:800}} button.danger{{border-color:#663434;color:#ffaaaa}} .row{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}} .grow{{flex:1}} .pill{{display:inline-block;padding:3px 7px;border:1px solid #34404a;border-radius:99px;font-size:10px;color:var(--muted)}} .log{{max-height:360px;overflow:auto}} .mono{{white-space:pre-wrap}} .muted{{color:var(--muted)}} h2{{font-size:14px;margin:0 0 12px}} a{{color:var(--cyan)}} 
+button,select,input,textarea{{font:inherit;border-radius:8px;border:1px solid #34404a;background:#0a0e11;color:#e9eef1;padding:8px 9px}} textarea{{width:100%;min-height:84px;resize:vertical}} button{{cursor:pointer}} button.primary{{background:var(--yellow);color:#090909;border-color:var(--yellow);font-weight:800}} button.danger{{border-color:#663434;color:#ffaaaa}} .row{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}} .grow{{flex:1}} .pill{{display:inline-block;padding:3px 7px;border:1px solid #34404a;border-radius:99px;font-size:10px;color:var(--muted)}} .log{{max-height:360px;overflow:auto}} .mono{{white-space:pre-wrap}} .muted{{color:var(--muted)}} h2{{font-size:14px;margin:0 0 12px}} a{{color:var(--cyan)}} 
 @media(max-width:1000px){{.card,.wide{{grid-column:span 6}}}} @media(max-width:650px){{main{{padding:12px}}.card,.wide{{grid-column:1/-1}}header{{padding:14px}}}}
 </style></head>
 <body><header><div><span class="brand">◆ LOOPBACK</span> <span class="host">{safe_host}</span></div><div class="row"><span id="updated" class="host"></span><a href="/admin/logout">logout</a></div></header>
@@ -45,6 +45,18 @@ button,select,input{{font:inherit;border-radius:8px;border:1px solid #34404a;bac
 <section class="card"><div class="label">24h MCP calls</div><div id="calls" class="big">0</div><div><span id="failures">0</span> non-success</div></section>
 
 <section class="card wide"><h2>System</h2><div id="system" class="mono muted">loading…</div></section>
+<section class="card wide"><h2>Capability status</h2><div id="capabilities" class="mono muted">loading…</div></section>
+
+<section class="card full"><h2>Policy boundaries</h2>
+<div class="grid" style="padding:0">
+  <div class="card wide" style="grid-column:span 6"><div class="label">Allowed roots · one per line</div><textarea id="allowedRoots"></textarea></div>
+  <div class="card wide" style="grid-column:span 6"><div class="label">Denied roots · one per line</div><textarea id="deniedRoots"></textarea></div>
+  <div class="card wide" style="grid-column:span 6"><div class="label">Allowed tools · * or one per line</div><textarea id="allowedTools"></textarea></div>
+  <div class="card wide" style="grid-column:span 6"><div class="label">Denied tools · one per line</div><textarea id="deniedTools"></textarea></div>
+</div>
+<div class="row" style="margin-top:10px"><label><input id="allowBrowser" type="checkbox"> enable optional browser automation</label><button class="primary" onclick="saveBoundaries()">Save boundaries</button></div>
+</section>
+
 <section class="card wide"><h2>Nodes</h2><div class="row"><input id="nodeName" placeholder="name"><input id="nodeUrl" class="grow" placeholder="https://host.example/mcp"><input id="nodeToken" type="password" placeholder="bearer token"><button onclick="addNode()">Add</button></div><div id="nodes"></div></section>
 
 <section class="card wide"><h2>Background jobs</h2><div id="jobTable"></div></section>
@@ -62,6 +74,12 @@ async function refresh(){{
   const d=await j('/api/admin/overview');
   hostname.textContent=d.system.hostname; uptime.textContent='uptime '+Math.round(d.system.uptime_seconds/60)+'m';
   profile.textContent=d.policy.profile; profileSelect.value=d.policy.profile;
+  allowedRoots.value=(d.policy.allowed_roots||[]).join('\n');
+  deniedRoots.value=(d.policy.denied_roots||[]).join('\n');
+  allowedTools.value=(d.policy.allowed_tools||['*']).join('\n');
+  deniedTools.value=(d.policy.denied_tools||[]).join('\n');
+  allowBrowser.checked=!!d.policy.allow_browser;
+  capabilities.textContent='browser adapter: '+(d.browser.available?'available':'not installed')+' / '+(d.policy.allow_browser?'enabled':'disabled')+'\ndocument tools: DOCX / XLSX / PDF';
   jobs.textContent=d.jobs.filter(x=>x.running).length; terms.textContent=d.terminals.filter(x=>x.alive).length; approvals.textContent=d.approvals.length;
   calls.textContent=d.audit.total; failures.textContent=d.audit.failures;
   system.textContent='load: '+d.system.load.join('  ')+'\nmemory: '+d.system.memory_used_human+' / '+d.system.memory_total_human+'\ndisk: '+d.system.disk_used_human+' / '+d.system.disk_total_human+'\npython: '+d.system.python;
@@ -74,6 +92,15 @@ async function refresh(){{
  }}catch(e){{updated.textContent='dashboard error: '+e.message}}
 }}
 async function saveProfile(){{await j('/api/admin/policy',{{method:'POST',body:JSON.stringify({{profile:profileSelect.value}})}});refresh()}}
+const lines=v=>v.split('\n').map(x=>x.trim()).filter(Boolean);
+async function saveBoundaries(){{
+ await j('/api/admin/policy',{{method:'POST',body:JSON.stringify({{
+   allowed_roots:lines(allowedRoots.value),denied_roots:lines(deniedRoots.value),
+   allowed_tools:lines(allowedTools.value),denied_tools:lines(deniedTools.value),
+   allow_browser:allowBrowser.checked
+ }})}});
+ refresh();
+}}
 async function approve(id,uses=1,ttl=null){{await j('/api/admin/approvals/'+id+'/approve',{{method:'POST',body:JSON.stringify({{uses,ttl_seconds:ttl}})}});refresh()}}
 async function stopJob(id){{await j('/api/admin/jobs/'+id+'/stop',{{method:'POST',body:'{{}}'}});refresh()}}
 async function closeTerm(id){{await j('/api/admin/terminals/'+id+'/close',{{method:'POST',body:'{{}}'}});refresh()}}
