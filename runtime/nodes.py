@@ -113,7 +113,10 @@ class NodeRegistry:
             target = str(node.get("target") or name)
             remote = command
             if cwd:
-                remote = f"cd {shlex.quote(cwd)} && {command}"
+                if cwd == "~":
+                    remote = f"cd ~ && {command}"
+                else:
+                    remote = f"cd {shlex.quote(cwd)} && {command}"
             proc = subprocess.run(
                 [
                     "ssh",
