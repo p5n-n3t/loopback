@@ -318,7 +318,7 @@ node(){
       local token_value=""
       if [[ "${3:-}" == "--token-env" ]]; then
         local env_name="${4:?environment variable name}"
-        token_value="${(P)env_name:-}"
+        token_value="${!env_name:-}"
       elif [[ -n "${3:-}" ]]; then
         die "use: loopback node add NAME URL [--token-env ENV]"
       elif [[ -t 0 ]]; then
