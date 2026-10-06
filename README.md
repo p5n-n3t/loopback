@@ -47,6 +47,8 @@ Loopback on 127.0.0.1
 - **Document operations** — structured DOCX, XLSX, and PDF reading/editing helpers.
 - **Optional browser automation** — narrow open/snapshot/click/fill tools through
   an installed `agent-browser`, disabled by policy by default.
+- **Optional native desktop control** — Linux/X11 window discovery, screenshots,
+  window activation, click/type/key tools, separately disabled by default.
 - **MCP tool annotations** — safe/read-only tools advertise their intent so
   clients can make better confirmation decisions.
 
@@ -118,6 +120,13 @@ https://<host>/admin
 
 Browser automation is opt-in and requires the separate `agent-browser`
 executable. It is not silently installed by Loopback.
+
+Native desktop automation is also opt-in. On Linux/X11 it can use `xdotool`,
+`wmctrl`, and an available screenshot utility. `desktop_screenshot` returns
+actual MCP image content when the client supports it.
+
+- `desktop_status`, `desktop_windows`, `desktop_screenshot`
+- `desktop_activate_window`, `desktop_click`, `desktop_type`, `desktop_key`
 
 ### System, policy, and fleet
 
