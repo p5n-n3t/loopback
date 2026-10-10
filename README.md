@@ -2,7 +2,7 @@
   <img src="assets/loopback-logo.svg" alt="Loopback" width="180">
 </p>
 
-[![M8ven Score](https://m8ven.ai/badge/mcp/p5n-n3t-loopback-1cyblg)](https://m8ven.ai/mcp/p5n-n3t-loopback-1cyblg?s=readme)4
+[![M8ven Score](https://m8ven.ai/badge/mcp/p5n-n3t-loopback-1cyblg)](https://m8ven.ai/mcp/p5n-n3t-loopback-1cyblg?s=readme)
 
 # Loopback
 
