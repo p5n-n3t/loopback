@@ -2,6 +2,8 @@
   <img src="assets/loopback-logo.svg" alt="Loopback" width="180">
 </p>
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/p5n-n3t-loopback-1cyblg?v=68aeba56efe25452966def7110fda2d8)](https://m8ven.ai/mcp/p5n-n3t-loopback-1cyblg?s=readme)
+
 # Loopback
 
 **A self-hostable MCP control plane for computers and servers.**
