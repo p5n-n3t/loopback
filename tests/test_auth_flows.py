@@ -258,6 +258,28 @@ class OAuthFlowTests(unittest.TestCase):
         self.c.get("/admin/logout")
         self.assertEqual(self.c.get("/api/admin/overview").status_code, 401)
 
+    def test_csrf_origin_check_is_same_origin_not_allowlist(self):
+        self.c.post("/admin/login", data={"credential": self.machine_token})
+        csrf = self.c.get("/api/admin/session").json()["csrf"]
+        headers = {"X-Loopback-CSRF": csrf}
+        # Reached through a reverse proxy / tunnel hostname that is not a configured public host: allowed when Origin == Host.
+        r = self.c.put("/api/admin/policy", json={"profile": "restricted"}, headers={**headers, "Origin": "https://proxy.example.net", "Host": "proxy.example.net"})
+        self.assertEqual(r.status_code, 200, r.text)
+        # Behind a proxy that rewrites Host to a different name: the browser's Sec-Fetch-Site vouches for same-origin.
+        r = self.c.put("/api/admin/policy", json={"profile": "restricted"}, headers={**headers, "Origin": "https://tunnel.example.net", "Sec-Fetch-Site": "same-origin"})
+        self.assertEqual(r.status_code, 200, r.text)
+        # A browser-marked cross-site request is refused even with a (somehow obtained) token.
+        r = self.c.put("/api/admin/policy", json={"profile": "restricted"}, headers={**headers, "Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"})
+        self.assertEqual(r.status_code, 403)
+        # An unexplained Origin mismatch with a valid token is allowed (proxies rewrite Host) but audited.
+        r = self.c.put("/api/admin/policy", json={"profile": "restricted"}, headers={**headers, "Origin": "https://odd-proxy.example"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.server.AUTH.recent_events(1)[0]["event"], "csrf_origin_mismatch")
+        # Without the CSRF header nothing passes, whatever the Origin says.
+        r = self.c.put("/api/admin/policy", json={"profile": "restricted"}, headers={"Origin": "http://127.0.0.1:2026", "Sec-Fetch-Site": "same-origin"})
+        self.assertEqual(r.status_code, 403)
+        self.c.get("/admin/logout")
+
     def test_enrollment_sets_password(self):
         code = self.server.AUTH.create_enrollment(ttl=60)
         r = self.c.post("/admin/enroll", data={"code": "bogus", "password": "correct horse battery", "password2": "correct horse battery"})

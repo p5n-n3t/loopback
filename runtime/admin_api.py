@@ -167,7 +167,8 @@ def routes(ctx: AppContext) -> list[Route]:
         })
 
     async def identity_view(request: Request) -> Response:
-        return ok({**ctx.identity.as_dict(), "host": identity_mod.describe_host(), "effective_shell": ctx.config.effective_shell(),
+        facts = identity_mod.describe_host()
+        return ok({**ctx.identity.as_dict(), "host": facts, "host_facts": facts, "effective_shell": ctx.config.effective_shell(),
                    "initial_cwd": ctx.config.effective_initial_cwd(), "terminals_supported": bool(ctx.terminals and ctx.terminals.available())})
 
     # ------------------------------------------------------------------- config

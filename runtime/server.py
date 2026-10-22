@@ -1031,14 +1031,28 @@ class AdminGate:
             response = JSONResponse({"detail": "admin authentication required"}, status_code=401, headers=auth_http.NO_STORE)
             return await response(scope, receive, send)
         if scope.get("method", "GET").upper() not in {"GET", "HEAD", "OPTIONS"}:
-            origin = request.headers.get("origin")
-            origin_ok = True
-            if origin:
-                origin_ok = origin.rstrip("/") in CTX.auth.base_urls or origin.rstrip("/") in {f"http://127.0.0.1:{CTX.config.port}", f"http://localhost:{CTX.config.port}"}
-            if not auth_http.csrf_ok(session, request) or not origin_ok:
-                AUTH.record_event("csrf_rejected", "session", auth_http.client_ip(request), {"path": path})
+            if not auth_http.csrf_ok(session, request):
+                AUTH.record_event("csrf_rejected", "session", auth_http.client_ip(request),
+                                  {"path": path, "origin": request.headers.get("origin", "")[:200], "host": request.headers.get("host", "")[:200],
+                                   "sec_fetch_site": request.headers.get("sec-fetch-site", ""), "csrf_header": bool(request.headers.get("x-loopback-csrf"))})
                 response = JSONResponse({"detail": "CSRF validation failed"}, status_code=403, headers=auth_http.NO_STORE)
                 return await response(scope, receive, send)
+            # Defence in depth: compare Origin with the host this request arrived on. The token above is
+            # the real barrier (unobtainable cross-site); a mismatch here is audited, not fatal, because
+            # tunnels and reverse proxies legitimately rewrite Host without forwarding the public name.
+            origin = request.headers.get("origin")
+            if origin:
+                from urllib.parse import urlparse
+
+                origin_host = (urlparse(origin).netloc or "").lower()
+                hosts = {(request.headers.get("host") or "").lower()}
+                forwarded = request.headers.get("x-forwarded-host")
+                if forwarded:
+                    hosts.add(forwarded.split(",")[0].strip().lower())
+                if origin_host not in hosts and origin.rstrip("/") not in CTX.auth.base_urls \
+                        and request.headers.get("sec-fetch-site") != "same-origin":
+                    AUTH.record_event("csrf_origin_mismatch", "session", auth_http.client_ip(request),
+                                      {"path": path, "origin": origin[:200], "host": request.headers.get("host", "")[:200]})
         scope.setdefault("state", {})["admin_session"] = session
         return await self.wrapped(scope, receive, send)
 
