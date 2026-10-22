@@ -1,0 +1,70 @@
+{
+  "_comment": "Example runtime config.json for Loopback v4. Copy into your config directory (see docs/CONFIGURATION.md for the resolution order) and edit to taste. Every field here is optional; omitted fields fall back to the built-in default shown in runtime/config.py.",
+  "schema_version": 2,
+  "version": "4.0.0",
+  "port": 2026,
+  "bind": "127.0.0.1",
+  "public_host": "loopback.example.com",
+  "display_name": "alice-workstation",
+  "node_kind": "local-computer",
+  "shell": null,
+  "initial_cwd": null,
+  "command_timeout": 120,
+  "max_output_bytes": 1048576,
+  "startup_timeout": 15,
+  "ingress": {
+    "local": {
+      "enabled": true
+    },
+    "cloudflare": {
+      "enabled": false,
+      "hostname": "loopback.example.com",
+      "tunnel_id": null,
+      "tunnel_name": null,
+      "token_file": null,
+      "config_file": null,
+      "access_policy": "oauth"
+    },
+    "tailscale": {
+      "enabled": false,
+      "mode": "serve",
+      "https_port": 443,
+      "dns_name": null
+    }
+  },
+  "auth": {
+    "legacy_machine_token_mcp": false,
+    "access_ttl_seconds": 3600,
+    "refresh_ttl_seconds": 2592000,
+    "session_ttl_seconds": 43200,
+    "code_ttl_seconds": 300,
+    "allowed_origins": [
+      "https://chatgpt.com",
+      "https://www.perplexity.ai",
+      "https://perplexity.ai"
+    ],
+    "allow_dynamic_registration": true,
+    "allow_client_id_metadata_documents": true,
+    "require_password_for_consent": true
+  },
+  "sandbox": {
+    "backend": "auto",
+    "require_enforcement": true,
+    "allow_tmp": true,
+    "acknowledge_unenforced": false
+  },
+  "maintenance": {
+    "update_channel": "stable",
+    "update_check_interval_hours": 24,
+    "auto_apply_updates": false,
+    "backup_retention": 10,
+    "log_max_bytes": 5242880,
+    "log_backups": 5,
+    "probe_interval_seconds": 60,
+    "history_retention_days": 7,
+    "audit_retention_days": 90,
+    "disk_warn_percent": 90,
+    "job_log_max_bytes": 67108864,
+    "max_completed_jobs": 200
+  }
+}

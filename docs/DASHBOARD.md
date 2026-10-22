@@ -1,72 +1,89 @@
 # Dashboard
 
-Loopback keeps the CLI as the automation and recovery interface and adds a web
-dashboard for operations that benefit from visibility.
+Loopback ships a browser-based operations dashboard: a vanilla-JS single
+page app served only to authenticated sessions, with a strict
+Content-Security-Policy (no inline script or style). It is a separate
+authentication surface from the MCP endpoint — see
+[AUTHENTICATION.md](AUTHENTICATION.md).
 
-Open the dashboard URL with:
+## Opening it
 
 ```bash
-loopback dashboard
+loopback dashboard --open
+loopback url
 ```
 
-The dashboard is normally available at:
+Reachable at `https://<public-host>/admin` once ingress is configured, or
+`http://127.0.0.1:<port>/admin` locally. `login`, `logout`, `enroll`,
+`static`, and `api` are reserved first path segments — you can't name a
+fleet node or SSH target any of those without it colliding with the
+dashboard's own routes.
 
-```text
-https://<public-host>/admin
-```
+## First run: the Welcome wizard
 
-or, in local-only mode:
+On a fresh install, logging in for the first time lands on a setup wizard
+instead of the Overview page: set the account password, pick a policy
+profile, choose ingress (local-only, Tailscale, or Cloudflare), and
+optionally register the first fleet node or SSH target. You can re-run any
+one step later from its own section without going through the wizard again.
 
-```text
-http://127.0.0.1:2026/admin
-```
+## Sections
 
-## Authentication
+- **Overview** — hostname, uptime, load/memory/disk, Python version,
+  current policy profile, sandbox status at a glance.
+- **Topology** — the fleet/ingress graph: nodes, SSH targets, ingress
+  paths, and connected MCP clients as one view, with real probe-derived
+  edge statuses.
+- **Local machine** — account, shell, config directory, virtualization,
+  detected service manager.
+- **Fleet** — Loopback nodes and SSH targets: add/remove, probe, per-target
+  policy. See [FLEET.md](FLEET.md).
+- **Filesystem** — browse allowed/denied roots, edit `allowed_roots`.
+- **Shell** — run one-off commands and manage background jobs/terminals
+  from the browser, subject to the same policy as any MCP client.
+- **MCP tools** — the live tool catalog: which tools are reachable, their
+  scope and annotations. See [TOOLS.md](TOOLS.md).
+- **Authentication** — OAuth clients, dashboard-minted API tokens, machine
+  token rotation, legacy-MCP machine-token toggle.
+- **Cloudflare** — named/token tunnel configuration and access policy. See
+  [CLOUDFLARE.md](CLOUDFLARE.md).
+- **Tailscale** — Serve/Funnel mode, tailnet status. See
+  [TAILSCALE.md](TAILSCALE.md).
+- **SSH config** — manage `ssh_targets.json` entries without the CLI.
+- **Jobs** — background job list, output, stop.
+- **Logs & diagnostics** — `server`/`cloudflared`/`tailscale` log tails,
+  `doctor`-equivalent checks.
+- **Security** — policy profile, approvals queue, sandbox self-test,
+  session revocation.
+- **Backup & recovery** — trigger `backup`/`restore`, view rollback
+  targets. See [RECOVERY.md](RECOVERY.md).
+- **Updates** — `update-check`/`upgrade` from the browser. See
+  [UPGRADE.md](UPGRADE.md).
+- **Settings** — the rest of `config.json`, editable through validated
+  forms rather than raw JSON.
 
-The login page accepts the local Loopback machine token and exchanges it for a
-12-hour HttpOnly, SameSite=Strict dashboard session cookie. The machine token
-is not stored in browser local storage.
+## Authentication model
 
-## Current controls
+Login (`POST /admin/login`) accepts the account password, or the machine
+token as a recovery path, and sets an HttpOnly, SameSite=Strict
+`loopback_admin` session cookie (default 12-hour TTL). Every
+state-changing request additionally carries an `X-Loopback-CSRF` header the
+page reads from its own session — a cookie alone is not sufficient to
+mutate anything. Revoke every dashboard session at once from Security →
+Sessions, or `POST /api/admin/auth/sessions/revoke-all`.
 
-The dashboard shows:
+The dashboard cannot call `/mcp`, and an OAuth/API bearer token cannot call
+the admin API — they are deliberately separate credential spaces. See
+[AUTHENTICATION.md](AUTHENTICATION.md).
 
-- hostname and Loopback uptime
-- system load, memory, disk, and Python version
-- current policy profile
-- allowed/denied filesystem roots and tool lists
-- optional browser-adapter availability/state
-- optional native-desktop availability/state
-- active background jobs
-- active persistent terminals
-- pending Loopback approval requests
-- 24-hour MCP activity/failure counts
-- registered fleet nodes
-- recent MCP audit activity
+## Static assets
 
-It can:
+Served from a fixed allowlist of extensions with path-traversal and
+symlink protection (`_safe_static_path` in `runtime/dashboard.py`); there is
+no general static-file passthrough.
 
-- switch between standard, trusted, read-only, and locked profiles
-- edit allowed/denied roots and allowed/denied MCP tools
-- explicitly enable or disable optional browser automation
-- explicitly enable or disable native desktop automation
-- approve a sensitive Loopback action once or for a bounded number of uses/time
-- stop Loopback background jobs
-- close Loopback PTY sessions
-- add/remove direct fleet nodes
+## See also
 
-## Why both dashboard and CLI?
-
-The dashboard is for situational awareness and policy. The CLI remains usable
-when the browser is unavailable, the public ingress is down, or the server
-needs repair.
-
-A good rule is:
-
-- use the dashboard for **observe, approve, configure, inspect**
-- use the CLI for **bootstrap, recover, automate, script**
-
-An embedded browser terminal is deliberately not enabled by default. MCP agents
-already have PTY tools; exposing another interactive terminal surface in the
-admin UI would increase attack surface without being necessary for normal
-operation.
+- [AUTHENTICATION.md](AUTHENTICATION.md), [PERMISSIONS.md](PERMISSIONS.md)
+- [ADMIN-API.md](ADMIN-API.md) — the HTTP contract behind every dashboard
+  action, for scripting the same operations directly.

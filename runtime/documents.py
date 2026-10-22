@@ -3,15 +3,31 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from docx import Document
-from openpyxl import load_workbook
-from openpyxl.utils.cell import range_boundaries
-from pypdf import PdfReader, PdfWriter
+
+
+def _docx():
+    from docx import Document  # lazy: keeps idle RSS low until a document tool is used
+
+    return Document
+
+
+def _openpyxl():
+    from openpyxl import load_workbook
+    from openpyxl.utils.cell import range_boundaries
+
+    return load_workbook, range_boundaries
+
+
+def _pypdf():
+    from pypdf import PdfReader, PdfWriter
+
+    return PdfReader, PdfWriter
 
 
 class DocumentTools:
+    """DOCX/XLSX/PDF helpers. Third-party libraries are imported on first use."""
     def docx_text(self, path: Path) -> dict[str, Any]:
-        doc = Document(str(path))
+        doc = _docx()(str(path))
         paragraphs = [p.text for p in doc.paragraphs]
         tables = []
         for table in doc.tables:
@@ -31,7 +47,7 @@ class DocumentTools:
     ) -> dict[str, Any]:
         if not old_text:
             raise ValueError("old_text cannot be empty")
-        doc = Document(str(path))
+        doc = _docx()(str(path))
         replacements = 0
 
         def replace_paragraph(paragraph) -> None:
@@ -66,11 +82,11 @@ class DocumentTools:
         }
 
     def xlsx_read_range(self, path: Path, sheet: str, cell_range: str) -> dict[str, Any]:
-        wb = load_workbook(str(path), data_only=False, read_only=True)
+        wb = _openpyxl()[0](str(path), data_only=False, read_only=True)
         if sheet not in wb.sheetnames:
             raise KeyError(f"sheet not found: {sheet}")
         ws = wb[sheet]
-        min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+        min_col, min_row, max_col, max_row = _openpyxl()[1](cell_range)
         values = [
             [ws.cell(row=r, column=c).value for c in range(min_col, max_col + 1)]
             for r in range(min_row, max_row + 1)
@@ -90,11 +106,11 @@ class DocumentTools:
         values: list[list[Any]],
         output: Path,
     ) -> dict[str, Any]:
-        wb = load_workbook(str(path))
+        wb = _openpyxl()[0](str(path))
         if sheet not in wb.sheetnames:
             raise KeyError(f"sheet not found: {sheet}")
         ws = wb[sheet]
-        min_col, min_row, _, _ = range_boundaries(f"{start_cell}:{start_cell}")
+        min_col, min_row, _, _ = _openpyxl()[1](f"{start_cell}:{start_cell}")
         rows = 0
         cells = 0
         for r_off, row in enumerate(values):
@@ -114,7 +130,7 @@ class DocumentTools:
         }
 
     def pdf_text(self, path: Path, start_page: int = 1, max_pages: int = 20) -> dict[str, Any]:
-        reader = PdfReader(str(path))
+        reader = _pypdf()[0](str(path))
         start = max(1, int(start_page))
         count = max(1, min(int(max_pages), 200))
         pages = []
@@ -132,10 +148,10 @@ class DocumentTools:
     def pdf_merge(self, paths: list[Path], output: Path) -> dict[str, Any]:
         if not paths:
             raise ValueError("at least one PDF is required")
-        writer = PdfWriter()
+        writer = _pypdf()[1]()
         total = 0
         for path in paths:
-            reader = PdfReader(str(path))
+            reader = _pypdf()[0](str(path))
             for page in reader.pages:
                 writer.add_page(page)
                 total += 1
@@ -145,8 +161,8 @@ class DocumentTools:
         return {"inputs": [str(p) for p in paths], "output": str(output), "pages": total}
 
     def pdf_extract_pages(self, path: Path, pages: list[int], output: Path) -> dict[str, Any]:
-        reader = PdfReader(str(path))
-        writer = PdfWriter()
+        reader = _pypdf()[0](str(path))
+        writer = _pypdf()[1]()
         selected = []
         for page_number in pages:
             n = int(page_number)

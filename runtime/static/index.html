@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<title>Loopback · Control plane</title>
+<link rel="stylesheet" href="/admin/static/app.css">
+<script src="/admin/static/topology.js" defer></script>
+<script src="/admin/static/app.js" defer></script>
+</head>
+<body data-host="{{HOST}}">
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <button class="icon-btn hamburger" id="navToggle" type="button" aria-label="Toggle navigation" aria-controls="nav" aria-expanded="false"><span></span><span></span><span></span></button>
+  <a class="brand" href="#/" aria-label="Loopback overview"><span class="logo" aria-hidden="true"></span>LOOPBACK <small>CONTROL PLANE</small></a>
+  <span class="host" title="Public host">{{HOST}}</span>
+  <span class="spacer"></span>
+  <span class="host" id="lastUpdated" aria-live="polite"></span>
+  <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle colour theme" title="Toggle theme">◐</button>
+  <a class="btn ghost sm" href="/admin/logout">Sign out</a>
+</header>
+<div class="layout">
+  <nav id="nav" class="nav" aria-label="Sections">
+    <div class="nav-group">Operate</div>
+    <a href="#/" data-route="">Overview</a>
+    <a href="#/topology" data-route="topology">Topology</a>
+    <a href="#/local" data-route="local">Local machine</a>
+    <a href="#/fleet" data-route="fleet" title="Loopback Nodes and SSH targets">Fleet</a>
+    <div class="nav-group">Access</div>
+    <a href="#/filesystem" data-route="filesystem">Filesystem</a>
+    <a href="#/shell" data-route="shell">Shell</a>
+    <a href="#/tools" data-route="tools">MCP tools</a>
+    <a href="#/auth" data-route="auth">Authentication</a>
+    <div class="nav-group">Network</div>
+    <a href="#/cloudflare" data-route="cloudflare">Cloudflare</a>
+    <a href="#/tailscale" data-route="tailscale">Tailscale</a>
+    <a href="#/ssh" data-route="ssh">SSH config</a>
+    <div class="nav-group">Maintain</div>
+    <a href="#/jobs" data-route="jobs" title="Background jobs and Persistent terminals">Jobs</a>
+    <a href="#/logs" data-route="logs" title="Doctor, logs, Recent MCP activity">Logs &amp; diagnostics</a>
+    <a href="#/security" data-route="security">Security</a>
+    <a href="#/backup" data-route="backup">Backup &amp; recovery</a>
+    <a href="#/updates" data-route="updates">Updates</a>
+    <a href="#/settings" data-route="settings">Settings</a>
+    <div class="nav-foot"><a href="#/welcome" data-route="welcome">Setup wizard</a></div>
+  </nav>
+  <div class="scrim" id="scrim" hidden></div>
+  <main id="main" class="main" tabindex="-1">
+    <noscript><div class="card"><h2>JavaScript required</h2><p>The Loopback dashboard needs JavaScript. The <code>loopback</code> CLI remains available for every operation.</p></div></noscript>
+    <section class="card skeleton" aria-busy="true">
+      <h2>Overview</h2>
+      <p class="muted">Loading identity, ingress, Nodes, jobs, Persistent terminals and Recent MCP activity…</p>
+    </section>
+  </main>
+  <aside id="panel" class="panel" aria-label="Details" aria-hidden="true" tabindex="-1">
+    <div class="panel-head"><h2 id="panelTitle">Details</h2><button class="icon-btn" type="button" data-act="panel-close" aria-label="Close details">✕</button></div>
+    <div id="panelBody" class="panel-body"></div>
+  </aside>
+</div>
+<dialog id="dlg" class="dlg" aria-labelledby="dlgTitle"></dialog>
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>

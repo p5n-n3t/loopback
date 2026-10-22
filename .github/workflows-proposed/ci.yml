@@ -1,0 +1,200 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "codex/**", "ls/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile
+        run: python -m compileall -q runtime
+      - name: Unit and integration tests
+        run: python -m unittest discover -s tests -v
+        env:
+          PYTHONUNBUFFERED: "1"
+
+  lint:
+    name: lint and static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt ruff bandit pip-audit
+          sudo apt-get update -q && sudo apt-get install -y -q shellcheck
+      - name: Ruff
+        run: ruff check runtime tests scripts
+      - name: Bandit (medium+ severity)
+        run: bandit -q -r runtime -ll -s B404,B603,B607,B602
+      - name: Dependency audit
+        run: pip-audit -r requirements.txt --strict
+      - name: Shell syntax and shellcheck
+        run: |
+          bash -n install.sh bin/loopback scripts/*.sh
+          shellcheck -S warning install.sh bin/loopback scripts/*.sh
+      - name: JavaScript syntax
+        run: |
+          node --check runtime/static/app.js
+          node --check runtime/static/topology.js
+          node --check packaging/npm/bin/loopback-mcp.js
+      - name: Version consistency
+        run: python scripts/check_versions.py
+      - name: No maintainer-specific paths or hosts in the product
+        run: |
+          ! grep -rnE '(/home/jq|ziopsyop|\bora[1-4]\b)' --include='*.py' --include='*.sh' --include='*.ps1' --include='*.js' --include='*.json' --include='*.md' \
+              runtime bin install.sh install.ps1 packaging skills docs README.md SECURITY.md CHANGELOG.md examples | grep -v 'docs/MIGRATION-v4.md' || { echo 'personal environment leaked into product files'; exit 1; }
+      - name: Agent skills frontmatter
+        run: python scripts/check_skills.py
+
+  powershell:
+    name: PowerShell installer parses
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse install.ps1 and bin/loopback.ps1
+        shell: pwsh
+        run: |
+          foreach ($f in @('install.ps1','bin/loopback.ps1')) {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.ToString() }; exit 1 }
+            Write-Host "ok $f"
+          }
+
+  install-linux-distros:
+    name: install smoke (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:bookworm", "ubuntu:24.04", "fedora:40", "alpine:3.20", "archlinux:latest", "opensuse/tumbleweed"]
+    steps:
+      - name: Bootstrap minimal tools (bash, curl, tar, sudo-less user)
+        shell: sh
+        run: |
+          if command -v apt-get >/dev/null; then apt-get update -q && apt-get install -y -q bash curl ca-certificates tar git >/dev/null; fi
+          if command -v dnf >/dev/null; then dnf install -y -q bash curl tar git findutils procps-ng >/dev/null; fi
+          if command -v apk >/dev/null; then apk add --no-cache bash curl tar git >/dev/null; fi
+          if command -v pacman >/dev/null; then pacman -Sy --noconfirm bash curl tar git >/dev/null; fi
+          if command -v zypper >/dev/null; then zypper -n install bash curl tar git >/dev/null; fi
+          id alice >/dev/null 2>&1 || (command -v useradd >/dev/null && useradd -m alice) || adduser -D alice
+      - uses: actions/checkout@v4
+      - name: Install as an ordinary user with a different home directory
+        shell: bash
+        run: |
+          chown -R alice "$GITHUB_WORKSPACE"
+          # The installer may need to add python3 + venv through the package manager; grant alice passwordless sudo if available.
+          if command -v sudo >/dev/null; then echo 'alice ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/alice; chmod 440 /etc/sudoers.d/alice; fi
+          if ! command -v sudo >/dev/null; then
+            # No sudo in this image: pre-install python as root so the smoke test exercises the unprivileged path.
+            if command -v apk >/dev/null; then apk add --no-cache python3 py3-pip py3-virtualenv >/dev/null; fi
+            if command -v pacman >/dev/null; then pacman -S --noconfirm python >/dev/null; fi
+            if command -v zypper >/dev/null; then zypper -n install python3 python3-pip >/dev/null; fi
+            if command -v dnf >/dev/null; then dnf install -y -q python3 python3-pip >/dev/null; fi
+            if command -v apt-get >/dev/null; then apt-get install -y -q python3 python3-venv python3-pip >/dev/null; fi
+          fi
+          su alice -c "cd '$GITHUB_WORKSPACE' && LOOPBACK_INSTALL_YES=1 bash scripts/install-smoke.sh"
+
+  install-macos:
+    name: install smoke (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Smoke install (local-only, no service)
+        run: LOOPBACK_INSTALL_YES=1 bash scripts/install-smoke.sh
+
+  install-windows:
+    name: install smoke (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (local-only, no service) and run doctor
+        shell: pwsh
+        run: |
+          $env:LOOPBACK_CONFIG_DIR = Join-Path $env:RUNNER_TEMP "loopback-cfg"
+          python runtime/cli.py install --non-interactive --ingress local --no-service --yes --source $PWD
+          python "$env:LOOPBACK_CONFIG_DIR/cli.py" doctor --json
+          python "$env:LOOPBACK_CONFIG_DIR/cli.py" down
+
+  npm-wrapper:
+    name: npm wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Pack and smoke the npx entry point from a local source tree
+        run: |
+          cd packaging/npm && npm pack --dry-run && cd ../..
+          export LOOPBACK_CONFIG_DIR="$RUNNER_TEMP/lb-npm"
+          LOOPBACK_SOURCE_DIR="$PWD" node packaging/npm/bin/loopback-mcp.js install --non-interactive --ingress local --no-service --yes
+          "$LOOPBACK_CONFIG_DIR/venv/bin/python" "$LOOPBACK_CONFIG_DIR/cli.py" status
+          "$LOOPBACK_CONFIG_DIR/venv/bin/python" "$LOOPBACK_CONFIG_DIR/cli.py" down
+
+  plugin-and-release-artifacts:
+    name: plugin bundle and release tarball
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build portable plugin package
+        run: |
+          python scripts/build_plugin.py --mcp-url https://loopback.example.com/mcp --output /tmp/loopback-plugin.zip
+          python - <<'PY'
+          import json, zipfile
+          with zipfile.ZipFile("/tmp/loopback-plugin.zip") as z:
+              names = set(z.namelist())
+              assert {"plugin.json", "mcp.json"} <= names, names
+              assert any(n.startswith("skills/loopback-core/") for n in names), names
+              assert json.loads(z.read("mcp.json"))["mcpServers"]["loopback"]["url"] == "https://loopback.example.com/mcp"
+          PY
+      - name: Build release tarball and checksums
+        run: bash scripts/make-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/

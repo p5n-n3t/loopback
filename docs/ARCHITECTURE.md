@@ -1,100 +1,112 @@
 # Architecture
 
-Loopback is a self-hostable MCP control plane for computers and servers.
+Loopback is one Python process combining an MCP resource server, an OAuth
+2.1 authorization server, an operations dashboard, and the policy/sandbox
+layer that enforces what either of those is allowed to do.
 
-Its core principle is that **the Loopback cloud is optional**. A single-machine
-installation can be reached directly through Cloudflare Tunnel, Tailscale
-Funnel, a reverse proxy, or localhost. A fleet installation can additionally
-route calls through one Loopback gateway.
+## Process layout
 
-## Direct mode
-
-```text
-MCP-capable agent
-      |
-      v
-Cloudflare / Tailscale / HTTPS
-      |
-      v
-127.0.0.1:2026
-      |
-      v
-Loopback
+```
+                         ┌─────────────────────────────────────────┐
+                         │               Loopback                  │
+  MCP client ──HTTPS───▶ │  Mount("/") → TokenGate → CORS → McpGate │
+  (OAuth/API token)      │       → MCP streamable-HTTP app (/mcp)   │
+                         │                                          │
+  Browser ──HTTPS──────▶ │  /admin (session cookie + CSRF)          │
+  (dashboard session)    │       dashboard.py SPA + /api/admin/*    │
+                         │                                          │
+                         │  /oauth/*  (DCR, authorize, token,       │
+                         │             revoke)        auth_http.py  │
+                         │  /.well-known/*  (metadata)              │
+                         │  /healthz                                │
+                         └───────────────┬──────────────────────────┘
+                                         │
+                      policy.py  sandbox.py  audit.py  context.py
+                                         │
+                    ┌────────────────────┼─────────────────────┐
+                    ▼                    ▼                     ▼
+            local filesystem     local shell/PTY/jobs    fleet.py / ssh_targets.py
+             (this machine)       (OS sandbox-wrapped)    → other nodes / SSH hosts
 ```
 
-The MCP origin remains bound to localhost. The ingress layer is replaceable.
+Ingress (Tailscale Serve/Funnel, Cloudflare Tunnel, a reverse proxy, or
+nothing beyond `127.0.0.1`) sits in front of this one process; see
+[TAILSCALE.md](TAILSCALE.md), [CLOUDFLARE.md](CLOUDFLARE.md),
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
-## Gateway mode
+## Modules (flat, top-level under `runtime/`)
 
-```text
-                   MCP-capable agent
-                          |
-                          v
-                    Loopback gateway
-                   /       |        \
-                  v        v         v
-               desktop    ora3      homelab
-```
+- **`server.py`** — the MCP tool definitions (`@mcp.tool`), the Starlette
+  app assembly (`TokenGate` → CORS → `McpGate` → MCP app), `/healthz`, and
+  the top-level route wiring that mounts `auth_http.py` and
+  `dashboard.py`'s routes alongside it.
+- **`auth.py` / `auth_http.py`** — the OAuth 2.1 authorization server:
+  client registration (DCR + CIMD), authorize/token/revoke endpoints,
+  metadata documents, refresh-token rotation and family revocation.
+- **`admin_api.py`** — the `/api/admin/*` HTTP contract behind the
+  dashboard (see [ADMIN-API.md](ADMIN-API.md)).
+- **`policy.py`** — profiles, allowed/denied roots, approval/deny command
+  patterns, per-target policy. Pure decision logic; doesn't know about
+  HTTP, OAuth, or the sandbox mechanism — just "is this path/command
+  allowed, and does it need an approval."
+- **`sandbox.py`** — OS-level enforcement for shell execution (Landlock,
+  bwrap, Seatbelt, or none), independent of and underneath `policy.py`'s
+  decision. See [PERMISSIONS.md](PERMISSIONS.md).
+- **`identity.py`** — account/shell/config-dir/service-manager detection,
+  shared by the CLI, installers, and the running server so they never
+  disagree about "who is this" or "where does state live."
+- **`context.py`** — the per-request/per-tool-call context object that
+  threads identity, policy, and target resolution through a tool call.
+- **`bootstrap.py`** — first-run setup: generating the machine token,
+  signing key, default `config.json`/`policy.json`, local self-registration
+  as a node.
+- **`audit.py`** — the local SQLite audit trail (`loopback.db`): tool name,
+  status, duration, target, bounded detail string — never credentials or
+  request/response bodies.
+- **`jobs.py`** — background job and PTY-terminal process management.
+- **`fleet.py`** — the Loopback-node registry (`nodes.json` +
+  `nodes.secrets.json`).
+- **`ssh_targets.py`** — the SSH-target registry, probing, and per-target
+  command execution (`ssh_targets.json`, `probe_state.json`).
+- **`config.py`** — `config.json` schema, defaults, legacy-`config.env`
+  migration.
+- **`cli.py`** — the `loopback` command surface: install/upgrade/rollback,
+  service control, `doctor`/`report`/`repair`, auth/policy/node/ssh
+  subcommands.
+- **`dashboard.py`** — the SPA shell, static asset serving, session
+  cookie/CSRF plumbing for `/admin`.
 
-Each node keeps its own endpoint and authentication credential. The gateway
-stores node credentials separately from the public node registry and exposes
-`node_list` and `node_call`.
+Modules import each other directly by name (`from config import
+ConfigStore`), not as a package — there is no `runtime/__init__.py`
+re-export surface to keep in sync.
 
-A gateway is additive. Direct node endpoints remain available for recovery,
-debugging, and clients that prefer one connector per machine.
+## Request paths
 
-## Capability layers
+- **MCP tool call**: `POST /mcp` → `TokenGate` (resolve bearer/API/machine
+  token → scopes) → `McpGate` (scope check) → tool function → `policy.py`
+  (`check_path`/`check_command`/`check_tool`) → optionally `sandbox.py`
+  (shell only) → `audit.py` records the call → response.
+- **Dashboard action**: browser → session cookie + CSRF header validated →
+  `admin_api.py` handler → the same `policy.py`/config/fleet modules used
+  by the MCP path (no separate "admin-only" copy of policy logic).
+- **Fleet call**: `node_call`/`node_execute`/`ssh_execute` → local
+  `policy.py` check for *that target* (never the local machine's roots) →
+  outbound HTTP (to another Loopback node) or SSH (to an SSH target) → the
+  remote side applies its own policy independently.
 
-### Files
+## Where the plugin/skills packaging fits
 
-Bounded reads, writes, exact patches, recursive search, tailing, Git status,
-and machine diagnostics.
+`scripts/build_plugin.py` is a release-time step, not part of the running
+server: it zips `skills/` plus a generated `plugin.json`/`mcp.json` for
+harnesses that consume an Agent Plugin bundle. See
+[SKILLS.md](SKILLS.md).
 
-### Execution
+## See also
 
-- bounded one-shot commands
-- background jobs with incremental output offsets
-- persistent PTY terminals
-- process inspection and signaling
-
-### Policy
-
-Loopback enforces policy on the machine, independently of the MCP client.
-Profiles are:
-
-- `standard` — normal access; sensitive command patterns require a Loopback approval
-- `trusted` — skips soft Loopback approvals but retains hard deny rules
-- `read-only` — filesystem reads/status only; shell and mutations are disabled
-- `locked` — emergency stop for operational capabilities
-
-Allowed and denied filesystem roots are checked by the server, not merely
-suggested to the model.
-
-### Client hints
-
-Loopback publishes MCP tool annotations such as read-only, destructive, and
-idempotent hints. Clients may use these to reduce unnecessary confirmation
-prompts. They are advisory metadata; they are not authorization and cannot
-override a client's own approval policy.
-
-### Authentication
-
-Direct clients can use the local bearer token.
-
-OAuth clients use authorization code + PKCE. The permanent machine token is
-entered only at the Loopback authorization gate. OAuth clients receive a
-short-lived signed access token and a refresh token; they do not receive the
-permanent machine bearer secret.
-
-### Observability
-
-MCP activity is written to a local SQLite audit store. The audit layer records
-tool/method name, timing, status, target name, and a bounded user-agent string.
-It does not persist bearer credentials or MCP request bodies.
-
-## Product boundary
-
-The open-source architecture does not require a vendor relay. An optional
-hosted gateway can later provide device enrollment, discovery, policy sync,
-team RBAC, alerting, and a universal public-plugin endpoint without changing
-the local MCP protocol.
+- [PERMISSIONS.md](PERMISSIONS.md) — the policy/sandbox decision logic in
+  depth.
+- [AUTHENTICATION.md](AUTHENTICATION.md) — the OAuth/token layer in depth.
+- [FLEET.md](FLEET.md) — the node/SSH-target layer in depth.
+- [ADMIN-API.md](ADMIN-API.md) — the dashboard's HTTP contract.
+- [DEPLOYMENT.md](DEPLOYMENT.md) — how this process is actually run
+  (service manager, ingress) on each platform.

@@ -3,57 +3,66 @@
 ## Lifecycle
 
 ```bash
-loopback up
-loopback down
+loopback up       # alias: start
+loopback down     # alias: stop
 loopback restart
 loopback status
 loopback doctor
 ```
 
-`up` starts the localhost MCP origin and then the selected ingress. `down`
+`up` starts the local MCP origin and then the configured ingress; `down`
 reverses the sequence.
 
 ## Endpoints
 
 ```bash
 loopback url
-loopback dashboard
+loopback dashboard --open
 ```
 
-The MCP path is `/mcp`; the admin UI is `/admin`.
+The MCP path is `/mcp`; the admin UI is `/admin`. See
+[AUTHENTICATION.md](AUTHENTICATION.md) for what authenticates each.
 
 ## Credentials
 
 ```bash
-loopback token
-loopback rotate-token
+loopback token                          # print the machine recovery token
+loopback auth token create NAME --scopes loopback:read,loopback:write --ttl 90d
+loopback auth token list
+loopback auth token revoke <id>
+loopback auth rotate-machine-token       # new machine token; OAuth untouched
+loopback auth rotate-signing-key         # invalidates every OAuth access token now
 ```
 
-Print the token only when explicitly needed. Rotation restarts the service and
-invalidates OAuth credentials derived from the previous secret.
+There is no single `loopback rotate-token` command — machine-token,
+signing-key, and per-API-token rotation are separate operations with
+different blast radii. See [SECURITY.md](../SECURITY.md) and
+[AUTHENTICATION.md](AUTHENTICATION.md). Print the machine token only when
+you actually need it for login/recovery.
 
 ## Policy
 
 ```bash
 loopback policy show
-loopback policy profile standard
-loopback policy profile trusted
+loopback policy profile restricted   # alias: standard
+loopback policy profile admin        # alias: trusted
 loopback policy profile read-only
+loopback policy profile development
 loopback policy profile locked
 ```
 
-The dashboard exposes the same profile switch plus bounded approval actions,
-filesystem boundaries, per-tool allow/deny lists, and the optional browser toggle.
+The dashboard's Security page exposes the same profile switch plus the
+pending-approvals queue, filesystem boundaries, per-tool allow/deny lists,
+and the browser/desktop automation toggles. Full profile definitions:
+[PERMISSIONS.md](PERMISSIONS.md).
 
 ## Choosing an execution tool
 
 ### Short command
 
-Use `execute` for commands that should finish within a bounded request.
+Use `execute` for commands that finish within a bounded request.
 
 ### Long-running non-interactive task
-
-Use:
 
 ```text
 job_start -> job_output(offset=...) -> job_stop
@@ -63,83 +72,63 @@ Output offsets let a client fetch only new log bytes.
 
 ### Stateful/interactive shell
 
-Use:
-
 ```text
 terminal_start -> terminal_write -> terminal_read -> terminal_close
 ```
 
-The PTY remains alive across MCP calls.
+The PTY stays alive across MCP calls. Not available on Windows — see
+[WINDOWS.md](WINDOWS.md).
 
 ### Process inspection
 
-Use `process_list` for structured process metadata. Use `process_kill` only
-when the intended process and side effect are clear.
+Use `process_list` for structured process metadata; `process_kill` only
+when the intended process and its side effect are clear (it refuses to
+target PID 1 or the Loopback server itself).
+
+Full tool reference: [TOOLS.md](TOOLS.md).
 
 ## Documents
 
-Structured document tools are available for common machine-side workflows:
-
-- DOCX text extraction and text replacement
-- XLSX range reads and writes
-- PDF text extraction, merge, and page extraction
-
-All paths pass through Loopback's filesystem policy.
+DOCX text extraction/replacement, XLSX range read/write, and PDF
+text-extraction/merge/page-extraction tools are available for common
+machine-side workflows. All paths pass through the same filesystem policy
+as the plain file tools.
 
 ## Optional browser automation
 
-`browser_status` reports whether the separate `agent-browser` executable is
-installed. Browser actions are disabled by policy by default.
-
-Enable them intentionally from the dashboard by turning on browser automation.
-The adapter provides structured open/snapshot/click/fill/URL/close operations,
+`browser_status` reports whether the separately installed `agent-browser`
+executable is present. Disabled by policy by default
+(`allow_browser: false`); enable it intentionally from the dashboard. The
+adapter provides structured open/snapshot/click/fill/URL/close operations,
 not arbitrary JavaScript evaluation.
 
 ## Optional native desktop automation
 
-Native desktop control is disabled by default. On a Linux/X11 node, enable it
-explicitly in the dashboard after confirming `desktop_status` reports the
-required local tools.
-
-Available operations include:
-
-- list visible windows
-- capture a desktop screenshot as MCP image content
-- activate a window
-- click coordinates
-- type text
-- send a constrained key expression
-
-This is deliberately a separate capability from browser automation so a server
-can allow one without allowing the other.
+Disabled by default (`allow_desktop: false`), Linux/X11 only. Enable it
+explicitly after confirming `desktop_status` reports the required local
+tools. Deliberately a separate capability from browser automation so a
+server can allow one without the other.
 
 ## Fleet
 
 ```bash
 loopback node list
-loopback node add NAME https://host.example/mcp
-loopback node remove NAME
+loopback node add build-server https://build-server.example.com/mcp --token-env BUILD_SERVER_TOKEN
+loopback node remove build-server
+loopback ssh add build-server alice@build.internal.example.com --identity ~/.ssh/id_ed25519_loopback
 ```
 
-Agents use `node_list` and `node_call` to route work.
+Agents use `node_list`/`node_call`/`ssh_target_list`/`ssh_execute` to route
+work across a fleet; see [FLEET.md](FLEET.md).
 
 ## Dashboard
 
-The dashboard is optimized for:
-
-- system health and Loopback uptime
-- live jobs/terminals
-- policy profile
-- pending approvals
-- node inventory
-- recent audit history
-
-The CLI remains the best interface for bootstrap, headless automation, and
-recovery when public ingress is unavailable.
+Covers system health, live jobs/terminals, topology, policy, pending
+approvals, fleet inventory, and recent audit history. See
+[DASHBOARD.md](DASHBOARD.md). The CLI remains the right interface for
+bootstrap, headless automation, and recovery when ingress itself is down.
 
 ## Boot persistence
-
-Fresh installs enable user-systemd autostart when systemd is available.
 
 ```bash
 loopback autostart on
@@ -147,25 +136,24 @@ loopback autostart off
 loopback autostart status
 ```
 
-Pass `--no-autostart` to the installer for session-only operation.
+Fresh installs enable autostart via the platform's service manager
+(systemd user unit / launchd / Task Scheduler) unless `--no-autostart` was
+passed at install time. See [PLATFORMS.md](PLATFORMS.md).
 
 ## Configuration
 
-```bash
-loopback config list
-loopback config get LOOPBACK_PORT
-loopback config set LOOPBACK_TIMEOUT 300
-```
-
-Restart after changing settings that affect runtime or transport.
+There is no `loopback config` subcommand. Edit `config.json` directly, or
+use the dashboard's Settings page — see [CONFIGURATION.md](CONFIGURATION.md)
+for the full schema and the config-directory resolution order. Restart
+after a direct edit (`loopback restart`); dashboard/admin-API changes
+restart only what's needed.
 
 ## Runtime state
 
-Generated state is kept under:
-
-```text
-~/.config/loopback/
-```
-
-This includes machine credentials, policy, node registry/secrets, audit database,
-job logs, service logs, PID files, and the installed runtime. Do not commit it.
+Generated state lives under the resolved config directory (see
+[CONFIGURATION.md](CONFIGURATION.md) — typically `~/.config/loopback` on
+Linux/macOS, `%LOCALAPPDATA%\Loopback` on Windows, or `LOOPBACK_CONFIG_DIR`
+if set): credentials, policy, fleet registry/secrets, audit and auth
+databases, job logs, service logs, and the installed runtime. Do not commit
+it; back it up with `loopback backup` instead (see
+[RECOVERY.md](RECOVERY.md)).

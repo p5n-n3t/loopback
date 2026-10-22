@@ -8,195 +8,179 @@
 
 **A self-hostable MCP control plane for computers and servers.**
 
-Loopback lets MCP-capable web agents operate authorized machines without requiring
-a vendor relay. Keep the MCP origin on localhost and choose the ingress that fits
-your environment: Cloudflare Tunnel, Tailscale Funnel, your own reverse proxy, or
-local-only operation.
-
-Loopback has been used with **ChatGPT** and **Perplexity**. It is protocol-first,
-not tied to either product: compatibility depends on the client supporting
-Streamable HTTP MCP and a compatible authentication method.
+Loopback runs on a machine you control and exposes it to MCP-capable clients
+(agentic IDEs, web agents, your own tooling) as a single authenticated
+Streamable HTTP endpoint — with a real OAuth 2.1 authorization server,
+machine-side policy enforcement, an OS-level sandbox where one is available,
+and an operations dashboard, all in one process. There is no mandatory
+hosted relay: you choose the ingress (local-only, Tailscale, Cloudflare
+Tunnel, or your own reverse proxy).
 
 ```text
-Web agent
-   |
-   v
-Cloudflare / Tailscale / HTTPS
-   |
-   v
-Loopback on 127.0.0.1
-   |
-   +-- files + Git
-   +-- commands + background jobs
-   +-- persistent PTY terminals
-   +-- processes + diagnostics
-   +-- policy + audit
-   +-- optional fleet gateway
+                 MCP client (IDE, web agent, your own code)
+                              |
+                 HTTPS: local-only / Tailscale / Cloudflare Tunnel
+                              |
+                 +-------------------------------+
+                 |   Loopback  (one process)      |
+                 |  OAuth 2.1 AS + MCP resource    |
+                 |  server, policy, sandbox,       |
+                 |  audit, dashboard                |
+                 +-------------------------------+
+                   |          |           |
+                   v          v           v
+              filesystem   shell /     registered
+              + documents  jobs /      nodes & SSH
+                           terminals    targets (fleet)
 ```
 
 ## Why Loopback?
 
-- **No mandatory Loopback cloud** — direct self-hosting is the default.
-- **Web-agent friendly** — static bearer auth for clients that support it and
-  OAuth + PKCE for clients that expect OAuth.
-- **Real terminal workflows** — one-shot commands, background jobs with
-  incremental output, and persistent PTYs.
-- **Machine-side policy** — filesystem boundaries, per-tool allow/deny rules,
-  policy profiles, hard command denies, and bounded approval grants.
-- **Observability** — authenticated dashboard plus local SQLite audit history.
-- **Fleet capable** — one connector can route MCP calls to registered Loopback
-  nodes, while each node retains its own identity and credential.
-- **Document operations** — structured DOCX, XLSX, and PDF reading/editing helpers.
-- **Optional browser automation** — narrow open/snapshot/click/fill tools through
-  an installed `agent-browser`, disabled by policy by default.
-- **Optional native desktop control** — Linux/X11 window discovery, screenshots,
-  window activation, click/type/key tools, separately disabled by default.
-- **MCP tool annotations** — safe/read-only tools advertise their intent so
-  clients can make better confirmation decisions.
+- **Self-hosted by default** — no account with a third party is required to
+  operate your own machine through MCP.
+- **Standards-based auth** — OAuth 2.1 authorization code + mandatory PKCE,
+  Dynamic Client Registration and Client ID Metadata Documents, RFC 8707
+  resource indicators, refresh-token rotation with reuse detection. Scoped,
+  revocable API tokens for bearer-only clients. See
+  [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md).
+- **Machine-side policy, not just client-side trust** — filesystem
+  allow/deny roots, per-tool allow/deny, command patterns that require
+  approval or are hard-denied outright, and policy profiles from `locked`
+  through `admin`. See [docs/PERMISSIONS.md](docs/PERMISSIONS.md).
+- **Real OS sandboxing where the platform offers one** — Landlock on Linux,
+  bubblewrap as a fallback, Seatbelt on macOS; file tools are always
+  enforced server-side regardless of sandbox availability. See
+  [docs/PERMISSIONS.md](docs/PERMISSIONS.md).
+- **Real terminal workflows** — bounded one-shot execution, background jobs
+  with incremental output, and persistent PTY terminals.
+- **Fleet-capable** — register other Loopback nodes or plain SSH targets and
+  route MCP tool calls to them, each with its own independent policy. See
+  [docs/FLEET.md](docs/FLEET.md).
+- **An operations dashboard** — topology, fleet, filesystem, shell, jobs,
+  logs, security, backup/recovery and settings, behind its own session auth.
+  See [docs/DASHBOARD.md](docs/DASHBOARD.md).
+- **Document tools** — structured DOCX, XLSX and PDF read/write helpers
+  instead of shelling out to convert office documents.
+- **Bundled Agent Skills** — ready-to-package skill guidance for coding
+  agents that use Loopback. See [docs/SKILLS.md](docs/SKILLS.md).
+
+A dashboard screenshot lives at `docs/images/dashboard-overview.png` once you
+have added one for your own deployment — Loopback ships no binary
+screenshots by default.
 
 ## Install
 
-Linux and macOS:
+One-liners (download, verify checksums, install):
+
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/p5n-n3t/loopback/main/install.sh | bash
+
+# Windows (PowerShell)
+irm https://github.com/p5n-n3t/loopback/releases/latest/download/install.ps1 | iex
+
+# Any platform with Node.js 18+
+npx loopback-mcp install
+```
+
+From a checkout:
 
 ```bash
 git clone https://github.com/p5n-n3t/loopback.git
 cd loopback
-./install.sh
-```
-
-For unattended local-only installation:
-
-```bash
 ./install.sh --non-interactive --ingress local
 ```
 
-Cloudflare example:
+Full options, service-manager details and platform notes are in
+[docs/INSTALL.md](docs/INSTALL.md) and [docs/PLATFORMS.md](docs/PLATFORMS.md)
+(Windows specifics: [docs/WINDOWS.md](docs/WINDOWS.md)).
+
+Once installed:
 
 ```bash
-./install.sh --ingress cloudflare --host loopback.example.com
-```
-
-The installer creates `~/.config/loopback`, builds an isolated Python
-environment, generates local credentials, installs the CLI at
-`~/.local/bin/loopback`, and configures the chosen ingress.
-
-The canonical MCP URL is:
-
-```text
-https://<host>/mcp
-```
-
-The admin dashboard is:
-
-```text
-https://<host>/admin
+loopback status       # is it running, on what port/ingress
+loopback url          # the MCP endpoint, e.g. https://loopback.example.com/mcp
+loopback dashboard --open
 ```
 
 ## MCP tools
 
-### Files and repositories
-
-- `read_file`
-- `write_file`
-- `list_dir`
-- `patch_file`
-- `search_text`
-- `tail_file`
-- `git_info`
-
-### Execution
-
-- `execute` — bounded one-shot shell command
-- `job_start`, `job_list`, `job_output`, `job_stop`
-- `terminal_start`, `terminal_write`, `terminal_read`, `terminal_resize`,
-  `terminal_close`
-- `process_list`, `process_kill`
-
-### Documents and optional browser
-
-- `docx_text`, `docx_replace_text`
-- `xlsx_read_range`, `xlsx_write_range`
-- `pdf_text`, `pdf_merge`, `pdf_extract_pages`
-- `browser_status`, `browser_open`, `browser_snapshot`, `browser_click`,
-  `browser_fill`, `browser_get_url`, `browser_close`
-
-Browser automation is opt-in and requires the separate `agent-browser`
-executable. It is not silently installed by Loopback.
-
-Native desktop automation is also opt-in. On Linux/X11 it can use `xdotool`,
-`wmctrl`, and an available screenshot utility. `desktop_screenshot` returns
-actual MCP image content when the client supports it.
-
-- `desktop_status`, `desktop_windows`, `desktop_screenshot`
-- `desktop_activate_window`, `desktop_click`, `desktop_type`, `desktop_key`
-
-### System, policy, and fleet
-
-- `diagnostics`
-- `machine_info`
-- `policy_status`
-- `node_list`
-- `node_call`
-- `node_read_file`, `node_execute`, `node_diagnostics`
+Filesystem (`read_file`, `write_file`, `list_dir`, `patch_file`,
+`search_text`, `tail_file`, `git_info`), execution (`execute`, `job_*`,
+`terminal_*`, `process_list`, `process_kill`), documents (`docx_*`,
+`xlsx_*`, `pdf_*`), optional browser and native-desktop automation, system
+and policy inspection (`diagnostics`, `machine_info`, `policy_status`), and
+fleet routing (`node_list`, `node_call`, `node_read_file`, `node_execute`,
+`node_diagnostics`). Every tool's MCP scope and annotations are listed in
+[docs/TOOLS.md](docs/TOOLS.md).
 
 ## Policy profiles
 
 ```bash
-loopback policy profile standard
-loopback policy profile trusted
+loopback policy show
+loopback policy profile restricted   # default; alias: standard
+loopback policy profile admin        # alias: trusted
 loopback policy profile read-only
+loopback policy profile development
 loopback policy profile locked
 ```
 
-- **standard** — normal operation; sensitive command patterns require a Loopback approval.
-- **trusted** — removes soft Loopback approval prompts while retaining hard deny rules.
-- **read-only** — disables shell/process mutations and filesystem writes.
-- **locked** — emergency operational lock.
-
-These are Loopback-side controls. A web agent may still enforce its own confirmation
-UI. Loopback does not bypass client-side approvals.
+Profiles set a baseline for filesystem mode, shell/process/fleet access,
+approval strictness, and whether an OS sandbox is required for shell
+execution. Full definitions, the default denied roots, and the sandbox
+backend matrix are in [docs/PERMISSIONS.md](docs/PERMISSIONS.md).
 
 ## Dashboard
 
 ```bash
-loopback dashboard
+loopback dashboard --open
 ```
 
-The dashboard shows system health, jobs, terminals, pending approvals, policy
-profile, fleet nodes, and recent MCP activity. It can approve bounded sensitive
-actions, stop jobs, close terminals, and manage nodes.
-
-The CLI remains the bootstrap/recovery interface; the dashboard is additive.
+A vanilla-JS single-page app, served only to authenticated sessions, with a
+strict Content-Security-Policy (no inline script or style). Covers Overview,
+Topology, Local machine, Fleet, Filesystem, Shell, MCP tools, Authentication,
+Cloudflare, Tailscale, SSH config, Jobs, Logs & diagnostics, Security,
+Backup & recovery, Updates, and Settings, plus a first-run Welcome wizard.
+See [docs/DASHBOARD.md](docs/DASHBOARD.md).
 
 ## Fleet
 
-Register another Loopback node:
-
 ```bash
-loopback node add ora3 https://ora3.example.com/mcp
+loopback node add build-server https://build-server.example.com/mcp
+loopback ssh add nas alice@nas.example.com --identity ~/.ssh/id_ed25519_loopback
 ```
 
-Then one gateway connector can discover nodes with `node_list` and route a
-specific MCP tool call with `node_call`.
-
-Node bearer credentials are stored separately from the public node registry.
+One gateway can route MCP calls to other Loopback nodes or to plain SSH
+targets; each gets independent policy and never inherits the local machine's
+allowed roots. See [docs/FLEET.md](docs/FLEET.md).
 
 ## Authentication
 
-Direct clients can continue using:
+- OAuth 2.1 clients (agentic IDEs, web agents that support OAuth): discovery
+  via `/.well-known/oauth-protected-resource` and
+  `/.well-known/oauth-authorization-server`, authorization code + PKCE,
+  scoped to `loopback:read` / `loopback:write` / `loopback:exec` /
+  `loopback:fleet` (never `loopback:admin`).
+- Bearer-only clients: a scoped, revocable API token minted from the
+  dashboard (`loopback auth token create ...`), not the permanent machine
+  token.
+- The machine token is a local bootstrap/recovery credential, rotatable with
+  `loopback auth rotate-machine-token`.
 
-```text
-Authorization: Bearer <machine-token>
-```
+See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) and, if you are looking
+for a way to turn a consumer AI subscription's own login session into an API
+key, [docs/OAUTH-TO-BEARER.md](docs/OAUTH-TO-BEARER.md) for why that specific
+thing is intentionally not supported.
 
-OAuth clients use authorization code + PKCE. The permanent machine token is
-entered at Loopback's authorization gate, but the OAuth client receives a
-short-lived signed access token and a refresh token instead of the permanent
-machine secret.
+## Ingress and exposure
 
-## ChatGPT plugin package
+Local-only (127.0.0.1, nothing exposed), Tailscale (tailnet-only Serve, or
+public Funnel), or Cloudflare Tunnel (named or token tunnel, with an access
+policy of OAuth, Cloudflare Access, or both). See
+[docs/TAILSCALE.md](docs/TAILSCALE.md), [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md)
+and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-Build a portable Agent Plugin archive for your own HTTPS endpoint:
+## Agent Plugin / Skills package
 
 ```bash
 python3 scripts/build_plugin.py \
@@ -204,26 +188,39 @@ python3 scripts/build_plugin.py \
   --output dist/loopback-plugin.zip
 ```
 
-See [docs/PLUGIN.md](docs/PLUGIN.md).
+Bundles `plugin.json`, `mcp.json`, and the whole `skills/` directory
+(`loopback-core`, `loopback-fleet`, `loopback-admin`,
+`loopback-troubleshooting`, `loopback-mcp-development`). See
+[docs/SKILLS.md](docs/SKILLS.md) and [docs/PLUGIN.md](docs/PLUGIN.md).
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Dashboard](docs/DASHBOARD.md)
-- [Web-agent compatibility](docs/WEB-AGENTS.md)
-- [Fleet gateway](docs/GATEWAY.md)
-- [Usage](docs/USAGE.md)
-- [Deployment](docs/DEPLOYMENT.md)
-- [Plugin packaging](docs/PLUGIN.md)
-- [Open-source / hosted product boundary](docs/MONETIZATION.md)
-- [Security](SECURITY.md)
+- [Install](docs/INSTALL.md) · [Upgrade](docs/UPGRADE.md) ·
+  [Migrating from v3](docs/MIGRATION-v4.md) · [Recovery](docs/RECOVERY.md)
+- [Configuration](docs/CONFIGURATION.md) · [Permissions & sandboxing](docs/PERMISSIONS.md)
+- [Authentication](docs/AUTHENTICATION.md) · [OAuth vs. bearer tokens](docs/OAUTH-TO-BEARER.md)
+- [Dashboard](docs/DASHBOARD.md) · [Fleet](docs/FLEET.md)
+- [Tailscale](docs/TAILSCALE.md) · [Cloudflare](docs/CLOUDFLARE.md) · [Deployment](docs/DEPLOYMENT.md)
+- [MCP tools](docs/TOOLS.md) · [Usage](docs/USAGE.md) · [Web agents](docs/WEB-AGENTS.md)
+- [Agent Skills](docs/SKILLS.md) · [Plugin packaging](docs/PLUGIN.md)
+- [Architecture](docs/ARCHITECTURE.md) · [Admin HTTP API](docs/ADMIN-API.md)
+- [Platforms](docs/PLATFORMS.md) · [Windows notes](docs/WINDOWS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md) · [Benchmarks](docs/BENCHMARKS.md)
+- [Releasing](docs/RELEASING.md) · [Open-source / hosted product boundary](docs/MONETIZATION.md)
+- [Security policy](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 ## Supported platforms
 
-- Linux: supported
-- macOS: supported; PTY/process behavior uses Unix facilities
-- Windows: use WSL for the current release
+| Platform | Support | Sandbox |
+|---|---|---|
+| Linux (glibc), x86_64 / arm64 | Full | Landlock (kernel 5.13+) or bubblewrap fallback |
+| Linux (musl, e.g. Alpine), x86_64 / arm64 | Full | bubblewrap fallback |
+| macOS 13+ | Full | `sandbox-exec` (Seatbelt) |
+| Windows 10/11 | Supported with limitations | None — see [docs/WINDOWS.md](docs/WINDOWS.md) |
+
+See [docs/PLATFORMS.md](docs/PLATFORMS.md) for the complete matrix and
+per-distribution installer notes.
 
 ## License
 
-MIT.
+MIT. See [LICENSE](LICENSE).
