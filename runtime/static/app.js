@@ -98,7 +98,17 @@ function errorsHtml(err) {
   const list = (err && err.errors) || [];
   return H`<div class="errors" role="alert"><b>${err ? err.message : 'Error'}</b>${list.length ? H`<ul>${list.map(e => H`<li>${typeof e === 'string' ? e : [e.field || e.loc, e.message || e.msg || JSON.stringify(e)].filter(Boolean).join(': ')}</li>`)}</ul>` : ''}</div>`;
 }
-function showErrors(container, err) { const box = container && (container.querySelector('.form-errors') || container); if (box) box.innerHTML = err ? String(errorsHtml(err)) : ''; }
+function showErrors(container, err) {
+  if (!container) return;
+  let box = container.querySelector('.form-errors');
+  if (!box && container.tagName === 'FORM') {
+    // Never wipe a form's own controls: errors for a form get their own box, created on demand.
+    if (!err) return;
+    box = doc.createElement('div'); box.className = 'form-errors'; container.appendChild(box);
+  }
+  box = box || container;
+  box.innerHTML = err ? String(errorsHtml(err)) : '';
+}
 
 /* -- toasts */
 function toast(msg, kind = 'info', ms = 4500) {
