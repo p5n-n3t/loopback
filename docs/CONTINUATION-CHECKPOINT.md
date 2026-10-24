@@ -3,6 +3,20 @@
 Updated: 2026-10-24. Task ITSCOM-1; PR https://github.com/p5n-n3t/loopback/pull/4.
 Working branch: `ls/1-so-i-am-starting-this-prompt-task-with-t-_EO8`.
 
+## Latest state (2026-10-24, after owner applied updater)
+
+- Source branch is pushed; no new PR opened. PR #4 was already merged before this continuation, so these continuation commits are not on main.
+- Desktop runs v4.0.0 from `729b791`, successfully upgraded from v2.1.0 with backup and automatic rollback available. Owner ran the follow-up updater. Local checkout with saved changes is preserved.
+- All seven eligible workers are installed and report actual CPU/RAM: ora1, ora3, ora5, ora6, ora7, aws1, aws2. Targets use their existing SSH aliases with `use_ssh_config: true`. Ora2 and ora4 are untouched.
+- A private read-only `ora1-system` stdio MCP binding on ora1:3031 is running. An actual authenticated MCP tool call returned hostname ora1, cpu_count 4. Its verification credential was revoked immediately. Other MCP services can be configured from Services & tunnels; no new public VM tunnel has been created.
+- Desktop Tailscale Serve configuration remains `{}`; no RotoXY URL, listener, service or Cloudflare connector was changed. The existing Cloudflare path serves the upgraded dashboard.
+- Desktop has no loopback.service startup unit. Owner was told to run `loopback autostart enable` locally before restarting if they want automatic dashboard startup. Remote ora1 service survives desktop restart; VM reboot auto-restart is not implemented.
+- All 115 tests pass; ruff and JS syntax checks pass; bandit reports no medium/high issues. Standard screenshot proof now works by starting the actual Loopback app on the previously idle, declared preview port 5173. Preview data is isolated and explicitly seeded, not a representation of VM connectivity.
+- Screenshots refreshed, plus reload-proven recordings of service creation and filesystem policy saving; three new logic flow charts cover workers/routes, per-service MCP authorization/forwarding, and attributed telemetry.
+- Final visual inspection found and fixed an invisible mobile hamburger (flex gaps had collapsed the bars). This CSS-only correction is on the final branch after `729b791`; apply the same local updater again when convenient to deploy it. It does not change the running VM workers.
+
+The historical notes below document the investigation and intermediate blockers; the latest state above supersedes their pending-work statements.
+
 ## Delivery state
 
 Branch pulled clean at start. GitHub and Lightsprint both report PR #4 MERGED (2026-10-24), despite the continuation brief calling it open. Do not open another PR without resolving this with the user. Further branch pushes cannot change the already-merged main commit.

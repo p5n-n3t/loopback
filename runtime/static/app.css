@@ -38,7 +38,7 @@ p{margin:.4em 0}
 .host{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:30vw}
 .spacer{flex:1}
 .hamburger{display:none}
-.hamburger span{display:block;width:16px;height:2px;background:var(--text);margin:3px 0;border-radius:1px}
+.hamburger{gap:3px}.hamburger span{display:block;flex:none;width:16px;height:2px;background:var(--text);margin:0;border-radius:1px}
 
 /* layout */
 .layout{display:flex;min-height:calc(100vh - 56px)}
