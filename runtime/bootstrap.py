@@ -82,6 +82,7 @@ def build_context(config_dir: str | Path | None = None, *, start_managers: bool 
     # Optional subsystems: present when their modules are installed.
     for attr, module_name, factory in (
         ("ssh", "ssh_targets", lambda m: m.SSHTargetStore(ctx)),
+        ("workers", "workers", lambda m: m.WorkerManager(ctx)),
         ("ingress", "ingress", lambda m: m.IngressManager(ctx)),
         ("topology", "topology", lambda m: m.TopologyBuilder(ctx)),
         ("maintenance", "maintenance", lambda m: m.MaintenanceManager(ctx)),

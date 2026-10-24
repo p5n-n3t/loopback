@@ -388,6 +388,7 @@ class IngressManager:
                     raise IngressError(f"Tailscale backend is not running (state: {st.get('BackendState') or 'unknown'})",
                                        self.diagnostics("tailscale"))
                 current = self._serve_status(https_port)
+                self._assert_ts_ownership(https_port, allow_owned=bool(prev.get("enabled") and prev_port == https_port))
                 # Turn off our previous handler if the port moved.
                 if prev.get("enabled") and prev_port != https_port:
                     commands += self._ts_off(prev_port)
@@ -431,12 +432,27 @@ class IngressManager:
         return {"ok": True, "commands": commands, "verification": verification,
                 "tailscale": self.tailscale_status(check_health=False)}
 
+    def _assert_ts_ownership(self, port: int, *, allow_owned: bool) -> None:
+        from node_agent import listeners
+
+        response = _run(["tailscale", "serve", "status", "--json"], timeout=8)
+        if not response["ok"]:
+            raise IngressError("Cannot inspect existing Tailscale listeners; refusing to change them")
+        try:
+            configured = listeners(json.loads(response["stdout"] or "{}"), port)
+        except (ValueError, TypeError):
+            raise IngressError("Invalid Tailscale listener status; refusing to change it") from None
+        expected = {"/": {"Proxy": f"http://127.0.0.1:{self.local_port}"}}
+        if configured and (not allow_owned or not all(web.get("Handlers") == expected for _, web in configured)):
+            raise IngressError("Tailscale port is occupied by an existing listener; choose another port. Existing routes are protected")
+
     def _ts_off(self, port: int) -> list[dict[str, Any]]:
         """Remove only our Serve/Funnel handler on *port* (errors are tolerated)."""
         out: list[dict[str, Any]] = []
         if not shutil.which("tailscale"):
             return out
         current = self._serve_status(port)
+        self._assert_ts_ownership(port, allow_owned=True)
         if current.get("funnel_active"):
             out.append(_cmd_summary(_run(["tailscale", "funnel", f"--https={port}", "off"])))
         if current.get("serve_active"):  # only when the handler on this port is ours

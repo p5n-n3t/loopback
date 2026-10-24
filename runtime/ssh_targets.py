@@ -305,6 +305,7 @@ class SSHTargetStore:
             "port": int(row.get("port") or 22),
             "user": row.get("user"),
             "identity_file": row.get("identity_file"),
+            "use_ssh_config": bool(row.get("use_ssh_config", False)),
             "display_name": row.get("display_name"),
             "kind": row.get("kind") or "unknown",
             "group": row.get("group"),
@@ -378,6 +379,9 @@ class SSHTargetStore:
             user = str(user).strip() if user not in (None, "") else (getattr(self.ctx.identity, "username", "") or "")
             if not USER_RE.match(user):
                 raise ValueError("user must be a valid POSIX account name")
+            use_ssh_config = pick("use_ssh_config", False)
+            if not isinstance(use_ssh_config, bool):
+                raise ValueError("use_ssh_config must be a boolean")
             identity_file = self._resolve_identity_file(pick("identity_file"))
             display_name = pick("display_name")
             if display_name is not None:
@@ -393,7 +397,7 @@ class SSHTargetStore:
                 raise ValueError(f"via must be one of {', '.join(VIA_CHOICES)}")
             now = _now()
             row = {
-                "name": name, "host": host, "port": port, "user": user, "identity_file": identity_file,
+                "name": name, "host": host, "port": port, "user": user, "identity_file": identity_file, "use_ssh_config": use_ssh_config,
                 "display_name": display_name, "kind": kind, "group": group, "via": via,
                 "created_at": existing.get("created_at") or now, "updated_at": now,
             }
@@ -456,11 +460,12 @@ class SSHTargetStore:
             raise RuntimeError("ssh client is not installed")
         args = [binary, "-T", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={int(connect_timeout)}",
                 "-o", "StrictHostKeyChecking=accept-new", "-o", "UpdateHostKeys=no",
-                "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2",
-                "-p", str(int(target.get("port") or 22))]
+                "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2"]
+        if not target.get("use_ssh_config"):
+            args += ["-p", str(int(target.get("port") or 22))]
         if target.get("identity_file"):
             args += ["-i", str(target["identity_file"]), "-o", "IdentitiesOnly=yes"]
-        args += ["--", f"{target['user']}@{target['host']}"]
+        args += ["--", str(target["host"]) if target.get("use_ssh_config") else f"{target['user']}@{target['host']}"]
         return args
 
     def _effective_via(self, target: dict[str, Any], *, resolve: bool) -> str:

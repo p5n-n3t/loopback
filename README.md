@@ -1,3 +1,5 @@
+<p align="center"><img src="https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-24/kGRaI0JCrKrjv8NSFfcjZ.png" width="288" alt="Loopback"></p>
+
 <p align="center">
   <img src="assets/loopback-logo.png" alt="Loopback" width="500">
 </p>
@@ -224,3 +226,7 @@ per-distribution installer notes.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+### Independent workers and tunnels
+
+Run HTTP or stdio MCP services on separate Linux workers from the central dashboard, with independent OAuth, Cloudflare or Tailscale exposure, and live process/host telemetry. See [Workers and independent MCP services](docs/WORKERS.md) for setup, safeguards and current limitations. The interface adapts the supplied [Rackwise Figma kit](https://www.figma.com/design/L1tPbHX8taPk3iRoMOsACC/Rackwise---Warehouse-dashboard); the symbol and wordmark use the supplied Loopback layers.

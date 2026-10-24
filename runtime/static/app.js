@@ -237,6 +237,7 @@ doc.addEventListener('keydown', e => {
 });
 A['panel-close'] = () => panel.close();
 A.refresh = () => refresh();
+I['nav-search'] = t => { $$('#nav a[data-route]').forEach(a => { a.hidden = !a.textContent.toLowerCase().includes(t.value.toLowerCase()); }); };
 A.go = t => { location.hash = t.dataset.href; };
 
 /* -- theme & nav */
@@ -244,7 +245,7 @@ A.go = t => { location.hash = t.dataset.href; };
 const mqLight = matchMedia('(prefers-color-scheme: light)');
 function applyTheme() {
   const t = localStorage.getItem('lb-theme');
-  doc.documentElement.dataset.theme = t === 'light' || t === 'dark' ? t : mqLight.matches ? 'light' : 'dark';
+  doc.documentElement.dataset.theme = t === 'light' || t === 'dark' ? t : 'light';
 }
 mqLight.addEventListener('change', applyTheme);
 const currentTheme = () => doc.documentElement.dataset.theme;
@@ -284,6 +285,7 @@ async function route() {
   $$('#nav a[data-route]').forEach(a => { const on = a.dataset.route === name; a.classList.toggle('active', on); on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'); });
   const navA = $(`#nav a[data-route="${CSS.escape(name)}"]`);
   doc.title = (navA ? navA.textContent + ' · ' : '') + 'Loopback';
+  $('#routeTitle').textContent = navA ? navA.textContent : 'Overview';
   main.innerHTML = '<div class="card skeleton" aria-busy="true"><span class="spin"></span> Loading…</div>';
   try { await (views[name] || notFound)(cur); if (my === seq) stamp(); }
   catch (e) {
@@ -360,49 +362,48 @@ function alertsHtml(alerts) {
 /* ============================================================ VIEWS */
 
 /* -- Overview */
+const per = x => x == null ? '—' : Number(x).toFixed(1) + '%';
+function ring(value, label, detail = '') {
+  const n = value == null ? 0 : Math.max(0, Math.min(100, value));
+  return H`<div class="ring-stat"><svg viewBox="0 0 48 48" role="img" aria-label="${label}: ${per(value)}"><circle class="ring-track" cx="24" cy="24" r="20"/><circle class="ring-fill" cx="24" cy="24" r="20" pathLength="100" stroke-dasharray="${n} 100"/><text x="24" y="27" text-anchor="middle">${value == null ? '—' : Math.round(n) + '%'}</text></svg><span><b>${label}</b><small>${detail}</small></span></div>`;
+}
+function workerCards(workers) {
+  return H`<div class="worker-cards">${workers.map(w => {
+    const m = w.worker || {}, h = w.host || {};
+    return H`<article class="worker-card" data-testid="worker-card"><div class="row"><span class="machine-icon" aria-hidden="true">▤</span><div class="grow"><b>${w.target === 'local' ? 'This machine' : w.target}</b><div class="small muted">${w.target === 'local' ? 'Controller + local services' : 'Remote worker'}</div></div>${st(w.status)}</div>
+      ${w.worker ? H`<div class="worker-rings">${ring(m.cpu_percent, 'Loopback CPU', h.cpu_count + ' cores · host ' + per(h.cpu_percent))}${ring(m.memory_percent, 'Loopback memory', bytes(m.rss_bytes) + ' / ' + bytes(h.memory_total))}</div><div class="worker-network"><span>↓ ${bytes(m.rx_per_second)}/s</span><span>↑ ${bytes(m.tx_per_second)}/s</span><small>MCP payload</small></div><div class="small muted">Host RAM ${per(h.memory_percent)} · host traffic ↓ ${bytes(h.rx_per_second)}/s ↑ ${bytes(h.tx_per_second)}/s</div>` : H`<p class="muted">${w.error || 'Waiting for telemetry'}</p>`}
+      <div class="worker-foot"><span class="small muted">Heartbeat ${rel(w.heartbeat_at)}</span><a href="#/services?target=${enc(w.target)}">Manage ↗</a></div></article>`;
+  })}</div>`;
+}
 views[''] = async v => {
   const load = async quiet => {
-    const [o, audit] = await Promise.all([api('/api/admin/overview', { quiet }), soft('/api/admin/audit?limit=15')]);
-    if (!state.identity) state.identity = await soft('/api/admin/identity');
+    const [o, audit, fleet] = await Promise.all([api('/api/admin/overview', { quiet }), soft('/api/admin/audit?limit=8'), get('/api/admin/workers')]);
     if (!v.alive()) return;
-    v.render(overview(o, arr(audit, 'rows', 'events', 'items'), state.identity || {})); stamp();
+    v.render(overview(o, arr(audit, 'rows', 'events', 'items'), fleet)); stamp();
   };
-  await load(false); v.poll(10000, load);
+  await load(false); v.poll(5000, load);
 };
-function overview(o, audit, idn) {
-  const id = o.identity || {}, sys = o.system || {}, au = o.auth || {}, ing = o.ingress || {}, up = o.update || {};
-  const alerts = arr(o.alerts).slice();
-  if (au.legacy_machine_token_mcp && !alerts.some(a => a.code === 'legacy_token'))
-    alerts.unshift({ level: 'warning', code: 'legacy_token', title: 'Legacy machine token accepted for MCP', message: 'Holders of the shared token get full access. Migrate clients to OAuth or API tokens.', action: '#/auth' });
-  const jobs = arr(o.jobs), terms = arr(o.terminals), appr = arr(o.approvals);
-  const running = jobs.filter(j => j.running), alive = terms.filter(t => t.alive);
-  const memP = pct(sys.memory_used, sys.memory_total), diskP = pct(sys.disk_used, sys.disk_total);
-  const firstRun = !au.password_set || (!au.api_tokens && !au.oauth_clients);
-  const cf = ing.cloudflare || {}, ts = ing.tailscale || {}, lo = ing.local || {};
-  return H`${head('Overview', H`${id.hostname || ''} · Loopback ${o.version || ''}`, H`<a class="btn sm" href="#/topology">Topology</a>`)}
-    ${up.available ? al('info', H`Update available: ${up.latest}`, H`You run ${up.current} on the ${up.channel} channel. Apply with <code>loopback upgrade</code>.`, H`<a class="btn sm" href="#/updates">Details</a>`) : ''}
-    ${firstRun ? al('info', 'Finish setting up this machine', 'Name it, choose how clients reach it and connect your first client.', H`<a class="btn sm primary" href="#/welcome">Open setup wizard</a>`) : ''}
-    ${alertsHtml(alerts)}
-    <div class="grid">
-    ${card('Identity', kv([['User', id.username], ['Home', H`<code>${id.home}</code>`], ['Hostname', id.hostname], ['OS', id.os || id.os_release], ['Platform', id.platform], ['Machine kind', id.machine_kind], ['Service manager', id.service_manager], ['Shell', H`<code>${idn.effective_shell || id.shell || idn.shell || '—'}</code>`], ['Initial cwd', H`<code>${idn.initial_cwd || id.initial_cwd || id.home || '—'}</code>`]]), { cls: 'c4', actions: H`${lnk('#/local', 'Details')}` })}
-    ${card('System', H`<div class="stack">
-      <div class="row"><div class="stat grow"><span class="label">Uptime</span><span class="big">${dur(sys.uptime_seconds)}</span></div><div class="stat grow"><span class="label">Load</span><span class="big">${arr(sys.load).map(x => Number(x).toFixed(2)).join(' ')}</span></div></div>
-      <div><div class="row"><span class="grow">Memory</span><span class="muted">${bytes(sys.memory_used)} / ${bytes(sys.memory_total)}</span></div>${meter(memP)}</div>
-      <div><div class="row"><span class="grow">Disk</span><span class="muted">${bytes(sys.disk_used)} / ${bytes(sys.disk_total)}</span></div>${meter(diskP)}</div>
-      <div class="small muted">Python ${sys.python || '—'} · policy <b>${(o.policy || {}).profile || '—'}</b> · sandbox ${o.sandbox ? (o.sandbox.active ? badge(o.sandbox.backend + ' active', 'ok') : badge('not enforced', 'warn')) : '—'}</div></div>`, 'c4')}
-    ${card('Authentication', H`${au.legacy_machine_token_mcp ? al('warning big', 'Legacy token enabled', 'The shared machine token still works for MCP.', H`<a class="btn sm primary" href="#/auth">Migrate</a>`) : ''}
-      ${kv([['Dashboard password', okb(au.password_set, 'set', 'not set')], ['Legacy machine token', au.legacy_machine_token_mcp ? badge('enabled', 'bad') : badge('disabled', 'ok')], ['OAuth clients', au.oauth_clients ?? 0], ['Active grants', au.active_oauth_grants ?? 0], ['API tokens', au.api_tokens ?? 0], ['Dashboard sessions', au.admin_sessions ?? 0]])}`, { cls: 'c4', actions: H`${lnk('#/auth', 'Manage')}` })}
-    ${card('Ingress', H`<div class="chips">${exposureBadges(ing)}</div><hr class="sep">${kv([
-      ['Local', lo.enabled === false ? badge('disabled', 'off') : H`<code>${lo.url || 'http://127.0.0.1'}</code>`],
-      ['Cloudflare', cf.enabled ? H`${cf.hostname || 'enabled'} ${cf.status ? badge(cf.status, cf.running === false ? 'bad' : 'ok') : ''}` : badge('off', 'off')],
-      ['Tailscale', ts.enabled ? H`${ts.dns_name || ''} ${badge(ts.mode === 'funnel' ? 'funnel · public' : 'serve · tailnet', ts.mode === 'funnel' ? 'bad' : 'info')}` : badge('off', 'off')],
-      ['Resource URIs', arr(au.resource_uris).length ? H`${au.resource_uris.map(u => H`<div><code>${u}</code></div>`)}` : undefined],
-    ])}`, { cls: 'c4', actions: H`${lnk('#/tailscale', 'Tailscale')}${lnk('#/cloudflare', 'Cloudflare')}` })}
-    ${card('Active work', H`<div class="row"><div class="stat grow"><span class="label">Jobs running</span><span class="big">${running.length}</span></div><div class="stat grow"><span class="label">Terminals</span><span class="big">${alive.length}</span></div><div class="stat grow"><span class="label">Approvals</span><span class="big">${appr.length}</span></div><div class="stat grow"><span class="label">24h calls</span><span class="big">${(o.audit || {}).total ?? 0}</span></div></div>
-      ${running.length ? H`<hr class="sep">${table(['Job', 'Target', 'Command', 'Started'], running.slice(0, 5).map(j => H`<tr><td><code>${j.id}</code></td><td>${targetBadge(j.target)}</td><td><code>${String(j.command || '').slice(0, 120)}</code></td><td>${time(j.started_at)}</td></tr>`))}` : ''}`, { cls: 'c4', actions: H`${lnk('#/jobs', 'Jobs')}` })}
-    ${card('Fleet', H`${kv([['Nodes', arr(o.nodes).length], ['SSH targets', arr(o.ssh_targets).length], ['Failures (24h)', (o.audit || {}).failures ?? 0]])}`, { cls: 'c4', actions: H`${lnk('#/fleet', 'Fleet')}` })}
-    ${card('Pending approvals', approvalsTable(appr), 'c12')}
-    ${card('Recent MCP activity', auditTable(audit), { cls: 'c12', actions: H`${lnk('#/logs', 'All activity')}` })}
+function overview(o, audit, fleet) {
+  const W = fleet.workers || [], B = fleet.bindings || [], local = W.find(w => w.target === 'local') || {};
+  const live = W.filter(w => w.status === 'healthy');
+  const running = W.flatMap(w => w.bindings || []).filter(b => b.running);
+  const mem = live.reduce((sum, w) => sum + (w.worker.rss_bytes || 0), 0);
+  const rx = live.some(w => w.worker.rx_per_second != null) ? live.reduce((sum, w) => sum + (w.worker.rx_per_second || 0), 0) : null;
+  const tx = live.some(w => w.worker.tx_per_second != null) ? live.reduce((sum, w) => sum + (w.worker.tx_per_second || 0), 0) : null;
+  const metric = (title, number, detail, tone, glyph) => H`<section class="card c3 summary-stat"><div class="row"><span class="metric-icon ${tone}" aria-hidden="true">${glyph}</span><b>${title}</b></div><div class="summary-value">${number}<small>${detail}</small></div></section>`;
+  return H`${head('Overview', 'Your services, wherever they run.', H`<span class="live-label">${dot('healthy')} Refreshes every 5s</span><a class="btn primary" href="#/services?new=1">+ New service</a>`)}
+    <div class="grid overview-grid" data-testid="fleet-overview">
+      ${metric('Connected workers', live.length, 'of ' + W.length + ' registered', 'green', '▤')}
+      ${metric('Running services', running.length, B.length + ' configured', 'blue', '↗')}
+      ${metric('MCP throughput', bytes(rx) + '/s', '↑ ' + bytes(tx) + '/s outbound', 'purple', '⇄')}
+      ${metric('Loopback memory', bytes(mem), 'across connected workers', 'rose', '◫')}
+      ${card('Workers', H`<p class="section-desc">Loopback processes and their children. Percentages use the host’s total capacity.</p>${workerCards(W)}`, {cls: 'c12', actions: lnk('#/fleet', 'Manage workers')})}
+      ${card('Service routes', table(['Service', 'Worker', 'Transport', 'Exposure', 'State'], B.map(b => {
+        const owner = W.find(w => w.target === b.target), status = owner?.bindings?.find(x => x.name === b.name);
+        return H`<tr><td><a href="#/services?edit=${enc(b.name)}"><b>${b.name}</b></a></td><td>${b.target}</td><td>${b.transport.toUpperCase()}</td><td>${badge(b.exposure, b.exposure.includes('funnel') || b.exposure === 'cloudflare' ? 'warn' : 'info')}</td><td>${owner?.status !== 'healthy' ? st('unreachable') : st(status?.running ? 'healthy' : 'disconnected')}</td></tr>`;
+      }), 'No services yet. Add an HTTP endpoint or a stdio MCP command, then choose its worker.'), {cls: 'c7', actions: lnk('#/services', 'View all')})}
+      ${card('Controller', H`<p class="section-desc">${o.identity?.hostname || ''} · Loopback ${o.version || ''}</p>${kv([['Local shell', lnk('#/shell', 'Review access')], ['Loopback CPU', per(local.worker?.cpu_percent)], ['Host CPU', per(local.host?.cpu_percent)], ['Host memory', bytes(local.host?.memory_used) + ' / ' + bytes(local.host?.memory_total)], ['OAuth clients', o.auth?.oauth_clients ?? 0], ['Policy', o.policy?.profile || '—']])}<hr class="sep"><p class="small muted">Remote services keep running when local shell access is disabled. SSH is used for worker control; MCP traffic goes to each worker directly.</p>`, {cls: 'c5', actions: lnk('#/topology', 'Topology ↗')})}
+      ${card('Recent activity', auditTable(audit), {cls:'c12', actions:lnk('#/logs', 'View all')})}
     </div>`;
 }
 
@@ -442,11 +443,12 @@ F.shellcwd = async (f, o) => { await put('/api/admin/config', { shell: o.shell |
 /* -- Fleet */
 const kindSel = (name, curv, id) => H`<select id="${id || 'f_' + name}" name="${name}">${KINDS.map(k => opt(k, curv || 'unknown'))}</select>`;
 views.fleet = async v => {
-  const [nodes, ssh] = await Promise.all([get('/api/admin/nodes'), soft('/api/admin/ssh')]);
+  const [nodes, ssh, workers] = await Promise.all([get('/api/admin/nodes'), soft('/api/admin/ssh'), get('/api/admin/workers')]);
   const N = arr(nodes, 'nodes'), S = arr(ssh, 'targets', 'ssh');
   const edit = v.params.get('edit'), e = N.find(n => n.name === edit) || {};
   v.render(H`${head('Fleet', 'Machines this gateway routes to. Credentials are write-only.', H`<a class="btn sm" href="#/topology">Topology</a>`)}
     <div class="grid">
+    ${card('Worker health', H`<p class="section-desc">Install a small worker over SSH to run services on that machine. No public control port is opened.</p><div id="fleet-health">${workerCards(workers.workers || [])}</div><div class="row">${S.map(t => H`<button class="sm" data-act="install-worker" data-target="${t.name}">Install / update ${t.name}</button>`)}</div>`, 'c12')}
     ${card('Nodes', table(['', 'Name', 'Display name', 'URL', 'Kind', 'Group', 'State', 'Last probe', ['', 'act']], N.map(n => {
       const p = n.last_probe || {};
       return H`<tr><td>${dot(p.status || 'untested')}</td><td><b>${n.name}</b></td><td>${n.display_name || ''}</td><td><code>${n.url}</code></td><td>${n.kind || ''}</td><td>${n.group || ''}</td><td>${okb(n.enabled !== false, 'enabled', 'disabled')}</td>
@@ -466,6 +468,12 @@ views.fleet = async v => {
     ${card('SSH targets', table(['', 'Name', 'Address', 'Kind', 'Group', ['', 'act']], S.map(s => H`<tr><td>${dot((s.last_probe || {}).status || 'untested')}</td><td><b>${s.name}</b>${s.display_name ? H`<div class="small muted">${s.display_name}</div>` : ''}</td><td><code>${s.user ? s.user + '@' : ''}${s.host}${s.port && s.port !== 22 ? ':' + s.port : ''}</code></td><td>${s.kind || ''}</td><td>${s.group || ''}</td>
         <td class="act"><button class="sm" data-act="probe" data-kind="ssh" data-name="${s.name}">Probe</button> <a class="btn sm" href="#/ssh?edit=${enc(s.name)}">Edit</a> <a class="btn sm" href="#/filesystem?target=${enc(s.name)}">Permissions</a></td></tr>`), 'No SSH targets. Add one under SSH config.'), { cls: 'c6', actions: H`<a class="btn sm primary" href="#/ssh">Add SSH target</a>` })}
     </div>`);
+  v.poll(5000, async () => { const data = await get('/api/admin/workers'); if (v.alive()) $('#fleet-health').innerHTML = String(workerCards(data.workers || [])); stamp(); });
+};
+A['install-worker'] = async t => {
+  if (!await confirmDo('Install worker on ' + t.dataset.target + '?', H`<p>Copy the Loopback worker and install its Python dependencies under the SSH account’s home. Existing services and tunnels stay in place.</p>`, 'Install worker', false)) return;
+  const result = await post('/api/admin/workers/' + enc(t.dataset.target) + '/install');
+  toast(result.setup === 'ready' ? 'Worker ready' : 'Worker installing. Check its status in a moment.', 'ok'); refresh();
 };
 F.node = async (f, o) => {
   const body = { name: o.name, url: o.url, enabled: o.enabled, description: o.description, display_name: o.display_name || null, kind: o.kind, group: o.group || null };
@@ -490,6 +498,59 @@ A['remove-machine'] = async t => {
   const kind = t.dataset.kind, name = t.dataset.name;
   if (!await confirmDo(`Remove ${name}?`, H`<p>This removes the ${kind === 'ssh' ? 'SSH target' : 'Loopback node'} <b>${name}</b> and its stored credential.</p>`, 'Remove')) return;
   await del(`/api/admin/${kind}/${enc(name)}`); toast('Removed', 'ok'); panel.close(); refresh();
+};
+
+/* -- Independent service bindings */
+views.services = async v => {
+  const [fleet, ssh] = await Promise.all([get('/api/admin/workers'), get('/api/admin/ssh')]);
+  const B = fleet.bindings || [], W = fleet.workers || [], S = arr(ssh, 'targets', 'ssh');
+  const edit = v.params.get('edit'), b = B.find(x => x.name === edit) || {};
+  const selectedTarget = b.target || v.params.get('target') || 'local';
+  const drawRows = data => table(['Service', 'Runs on', 'Connection', 'Exposure', 'Status', ['', 'act']], (data.bindings || []).map(x => {
+    const worker = data.workers.find(w => w.target === x.target), live = worker?.bindings?.find(r => r.name === x.name);
+    return H`<tr><td><b>${x.name}</b><div class="small muted">${live?.url || x.url || 'Not started'}</div></td><td>${x.target}</td><td>${x.transport.toUpperCase()}<div class="small muted">Port ${x.port}</div></td><td>${badge(x.exposure, x.exposure === 'cloudflare' || x.exposure.includes('funnel') ? 'warn' : 'info')}</td><td>${worker?.status !== 'healthy' ? st('unreachable') : st(live?.running ? 'healthy' : 'disconnected')}</td><td class="act"><button class="sm" data-act="binding-action" data-name="${x.name}" data-action="${x.desired === 'running' ? 'stop' : 'start'}">${x.desired === 'running' ? 'Stop' : 'Start'}</button> <button class="sm" data-act="binding-action" data-name="${x.name}" data-action="credential">Connect</button> <a class="btn sm" href="#/services?edit=${enc(x.name)}">Edit</a> <button class="sm danger" data-act="binding-action" data-name="${x.name}" data-action="delete">Delete</button></td></tr>`;
+  }), 'No service bindings. Add your first service below.');
+  v.render(H`${head('Services & tunnels', 'Choose what runs, where it runs, and how clients reach it.', H`<a class="btn" href="#/fleet">Manage workers</a>`)}
+    <div class="grid" data-testid="services-view">
+      ${card('Services', H`<div id="service-list">${drawRows(fleet)}</div>`, 'c12')}
+      ${card(edit ? 'Edit ' + edit : 'New service', H`<form data-form="binding" data-testid="binding-form">${errBox}<div class="fields">
+        ${fld('Service name', 'f_name', inp('name', b.name, {req:true, ph:'research-tools', extra:edit ? 'readonly' : 'pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,39}"'}))}
+        ${fld('Run on', 'f_target', H`<select id="f_target" name="target">${['local', ...S.map(s => s.name)].map(t => opt(t, selectedTarget, t === 'local' ? 'This machine' : t))}</select>`, 'Install the worker from Fleet before starting a remote service.')}
+        ${fld('Transport', 'f_transport', H`<select name="transport" id="f_transport" data-change="binding-transport">${opt('http', b.transport || 'http', 'HTTP / Streamable HTTP')}${opt('stdio', b.transport, 'stdio MCP command')}</select>`)}
+        ${fld('Worker port', 'f_port', inp('port', b.port || 3031, {type:'number', req:true, extra:'min="1024" max="65535"'}), 'A unique loopback listener on the selected machine.')}
+      </div><div id="http-fields"${b.transport === 'stdio' ? raw(' hidden') : ''}>
+        ${fld('Upstream MCP URL', 'f_upstream', inp('upstream', b.upstream, {ph:'http://127.0.0.1:8080/mcp'}), 'Resolved on the worker. The controller does not carry this traffic.')}
+        ${fld('Upstream bearer token file', 'f_upstream_token_file', inp('upstream_token_file', b.upstream_token_file, {ph:'optional path on worker'}), 'Client credentials are never forwarded to the upstream.')}
+      </div><div id="stdio-fields"${b.transport !== 'stdio' ? raw(' hidden') : ''}>
+        ${fld('Command arguments (JSON)', 'f_command', H`<textarea id="f_command" name="command" placeholder='["npx", "-y", "your-mcp-server"]'>${JSON.stringify(b.command || [], null, 2)}</textarea>`, 'Runs as the worker’s OS user. Use a dedicated account for shell-capable MCP servers.')}
+        ${fld('Working directory', 'f_cwd', inp('cwd', b.cwd, {ph:'optional path on worker'}))}
+      </div><div class="fields">
+        ${fld('Expose through', 'f_exposure', H`<select name="exposure" id="f_exposure" data-change="binding-exposure">${['private','tailscale-serve','tailscale-funnel','cloudflare'].map(t => opt(t, b.exposure || 'private', {'private':'Loopback only','tailscale-serve':'Tailscale Serve · private tailnet','tailscale-funnel':'Tailscale Funnel · public','cloudflare':'Cloudflare Tunnel · public'}[t]))}</select>`)}
+        ${fld('Tailscale HTTPS port', 'f_https_port', inp('https_port', b.https_port || 8443, {type:'number', extra:'min="1" max="65535"'}), 'Funnel allows 443, 8443 or 10000 per machine. Occupied listeners are protected.')}
+      </div><div id="cloudflare-fields"${b.exposure !== 'cloudflare' ? raw(' hidden') : ''}>
+        ${fld('Cloudflare hostname', 'f_hostname', inp('hostname', b.hostname, {ph:'tools.example.com'}))}
+        ${fld('Tunnel token file', 'f_token_file', inp('token_file', b.token_file, {ph:'~/.config/cloudflared/service.token'}), 'Token stays on the worker. In Cloudflare, point this hostname to http://127.0.0.1:<worker port>.')}
+      </div><label class="check"><input type="checkbox" name="confirm_public"${chk(b.confirm_public)}> I understand that Cloudflare and Funnel expose this service publicly, protected by its own Loopback OAuth.</label>
+      <p class="small muted">Each service has independent OAuth credentials. Tunnels start only when you press Start. Existing Tailscale listeners are never replaced.</p>
+      <div class="row end">${edit ? lnk('#/services', 'Cancel') : ''}<button type="submit" class="primary">Save service</button></div></form>`, 'c8')}
+      ${card('Designed to run elsewhere', H`<div class="note-icon">↗</div><h3>One dashboard. Your whole fleet.</h3><p class="muted">Host a stdio MCP on an Oracle VM, publish another through Cloudflare, and keep a private Tailscale service on your laptop.</p><hr class="sep"><h3>Local access is your choice</h3><p class="muted">Disabling the controller’s shell leaves remote services available. A worker exposes only the MCP you configure.</p><hr class="sep"><h3>Existing routes stay yours</h3><p class="muted">Choose a free HTTPS port. Loopback refuses to replace existing listeners, including your orchestration endpoint.</p><a class="btn sm" href="#/topology">Explore topology ↗</a>`, 'c4')}
+    </div>`);
+  v.poll(5000, async () => { const data = await get('/api/admin/workers'); if (v.alive()) $('#service-list').innerHTML = String(drawRows(data)); stamp(); });
+};
+C['binding-transport'] = t => { $('#http-fields').hidden = t.value !== 'http'; $('#stdio-fields').hidden = t.value !== 'stdio'; };
+C['binding-exposure'] = t => { $('#cloudflare-fields').hidden = t.value !== 'cloudflare'; };
+F.binding = async (f, o) => {
+  let command = [];
+  if (o.transport === 'stdio') { try { command = JSON.parse(o.command); } catch { throw new ApiError('Command must be a JSON array of arguments.', 400); } }
+  await post('/api/admin/bindings', {...o, command}); toast('Service saved. Press Start when ready.', 'ok'); location.hash = '#/services'; refresh();
+};
+A['binding-action'] = async t => {
+  const action = t.dataset.action;
+  if ((action === 'delete' || action === 'stop') && !await confirmDo(action === 'delete' ? 'Delete service?' : 'Stop service?', H`<p>${t.dataset.name}</p>`, action === 'delete' ? 'Delete' : 'Stop')) return;
+  const result = await post('/api/admin/bindings/' + enc(t.dataset.name) + '/' + action);
+  if (action === 'credential') {
+    panel.open('Connect ' + t.dataset.name, H`<p>Open the enrollment URL and use this one-time code to set the service’s OAuth password. It expires after ten minutes.</p><p><a href="${result.url}" target="_blank" rel="noopener noreferrer">${result.url}</a></p><div class="secret-once">${result.code}</div><p class="small muted">Private services require SSH port forwarding to reach the enrollment page. Add the service’s /mcp URL in your MCP client and authorize through OAuth.</p>`);
+  } else { toast(action === 'start' ? 'Service started' : action === 'stop' ? 'Service stopped' : 'Service deleted', 'ok'); refresh(); }
 };
 
 /* -- Filesystem */
@@ -778,7 +839,7 @@ views.ssh = async v => {
         <td>${p.status ? H`${st(p.status)}<div class="small muted">${p.latency_ms != null ? p.latency_ms + ' ms · ' : ''}${rel(p.checked_at)}${(p.remote || {}).os ? ' · ' + p.remote.os : ''}</div>${p.error ? H`<div class="small">${p.error}</div>` : ''}` : st('untested')}</td>
         <td class="act"><button class="sm" data-act="probe" data-kind="ssh" data-name="${s.name}">Probe</button> <a class="btn sm" href="#/ssh?edit=${enc(s.name)}">Edit</a> <a class="btn sm" href="#/filesystem?target=${enc(s.name)}">Permissions</a> <button class="sm danger" data-act="remove-machine" data-kind="ssh" data-name="${s.name}">Remove</button></td></tr>`;
     }), 'No SSH targets yet.'), 'c12')}
-    ${card(edit ? 'Edit ' + edit : 'Add SSH target', H`<form data-form="ssh">${errBox}<div class="fields">
+    ${card(edit ? 'Edit ' + edit : 'Add SSH target', H`<form data-form="ssh">${errBox}<label class="check"><input type="checkbox" name="use_ssh_config"${chk(e.use_ssh_config)}> Use SSH alias settings (host, port and user from this machine’s SSH config)</label><div class="fields">
       ${fld('Name', 'f_name', inp('name', e.name, { req: true, ph: 'db-1', extra: edit ? 'readonly' : 'pattern="[A-Za-z0-9._-]+"' }))}
       ${fld('Host', 'f_host', inp('host', e.host, { req: true, ph: 'db-1.tailnet.ts.net' }))}
       ${fld('Port', 'f_port', inp('port', e.port || 22, { type: 'number', extra: 'min="1" max="65535"' }))}
@@ -791,7 +852,7 @@ views.ssh = async v => {
       <div class="row end">${edit ? H`<a class="btn" href="#/ssh">Cancel</a>` : ''}<button type="submit" class="primary">${edit ? 'Save target' : 'Add target'}</button></div></form>`, 'c12')}</div>`);
 };
 F.ssh = async (f, o) => {
-  await post('/api/admin/ssh', { name: o.name, host: o.host, port: o.port || 22, user: o.user || null, identity_file: o.identity_file || null, display_name: o.display_name || null, kind: o.kind, group: o.group || null, via: o.via });
+  await post('/api/admin/ssh', { name: o.name, host: o.host, port: o.port || 22, user: o.user || null, identity_file: o.identity_file || null, display_name: o.display_name || null, kind: o.kind, group: o.group || null, via: o.via, use_ssh_config: o.use_ssh_config });
   toast('SSH target saved', 'ok'); if (parseHash().params.get('edit')) location.hash = '#/ssh'; else refresh();
 };
 
@@ -990,8 +1051,10 @@ F['wiz-ingress'] = async (f, o) => {
 };
 
 /* -- boot */
-const LB = { api, get, put, post, del, soft, H, raw, esc, toast, modal, confirmDo, panel, rel, abs, time, badge, dot, st, kv, safeKv, table, card, head, stamp, A, C, F, I, STATUS, STATUS_LABEL, isSecretKey, scrub, arr, enc, probeHtml, state, refresh, ApiError, errorsHtml };
+const LB = { bytes, api, get, put, post, del, soft, H, raw, esc, toast, modal, confirmDo, panel, rel, abs, time, badge, dot, st, kv, safeKv, table, card, head, stamp, A, C, F, I, STATUS, STATUS_LABEL, isSecretKey, scrub, arr, enc, probeHtml, state, refresh, ApiError, errorsHtml };
 window.LB = LB;
+const navPaths = { '':'M3 10 12 3l9 7v10H3Z M9 20v-7h6v7', topology:'M12 3v6M4 14h16M4 14v6m16-6v6M9 3h6v6H9Z', services:'M4 4h16v6H4Zm0 10h16v6H4ZM7 7h.01M7 17h.01', fleet:'M3 4h18v12H3Zm5 16h8m-4-4v4', filesystem:'M3 6h7l2 3h9v11H3Z', shell:'m5 7 5 5-5 5m8 0h6', tools:'m9 7-5 5 5 5m6-10 5 5-5 5', auth:'M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5Z', cloudflare:'M6 18a5 5 0 0 1-1-10 7 7 0 0 1 13 1 4 4 0 0 1 0 9Z', tailscale:'M5 5h.01M12 5h.01M19 5h.01M5 12h.01M12 12h.01M19 12h.01M5 19h.01M12 19h.01M19 19h.01', ssh:'m5 7 5 5-5 5m8 0h6', jobs:'M5 4h14v17H5ZM9 8h6m-6 4h6m-6 4h4', logs:'M4 20V4m0 16h17M8 15l4-5 4 3 5-8', security:'M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7Zm-4 9 3 3 5-6', backup:'M4 5h16v5H4Zm2 5v10h12V10m-9 4h6', updates:'M5 8a8 8 0 1 1-1 7M5 3v5h5', settings:'M9 3h6l1 4 4 1v8l-4 1-1 4H9l-1-4-4-1V8l4-1Zm0 9a3 3 0 1 0 6 0 3 3 0 1 0-6 0', local:'M3 4h18v12H3Zm5 16h8m-4-4v4', welcome:'m4 12 5 5L20 5' };
+$$('#nav a[data-route]').forEach(a => { a.insertAdjacentHTML('afterbegin', '<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="' + (navPaths[a.dataset.route] || navPaths.services) + '"/></svg>'); });
 applyTheme();
 $('#themeToggle').addEventListener('click', () => { localStorage.setItem('lb-theme', currentTheme() === 'dark' ? 'light' : 'dark'); applyTheme(); });
 $('#navToggle').addEventListener('click', () => setNav(!doc.body.classList.contains('nav-open')));

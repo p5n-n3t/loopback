@@ -32,6 +32,7 @@ class AppContext:
     fleet: Any
     started_at: float = field(default_factory=time.time)
     # Optional subsystems registered by their modules at import time.
+    workers: Any = None
     ssh: Any = None
     topology: Any = None
     ingress: Any = None
