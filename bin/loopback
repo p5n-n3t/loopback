@@ -1,422 +1,51 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+# Loopback CLI wrapper. The real implementation is cli.py (Python); this file
+# only locates it so Linux, macOS and Windows behave identically.
+#
+#   installed:        exec <cfg>/venv/bin/python <cfg>/cli.py "$@"
+#   source checkout:  loopback install ...  ->  python3 <repo>/runtime/cli.py install ...
+set -eu
 
-export PATH="$HOME/.local/bin:$PATH"
+if [ -n "${LOOPBACK_CONFIG_DIR:-}" ]; then
+  CFG="$LOOPBACK_CONFIG_DIR"
+elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
+  CFG="$XDG_CONFIG_HOME/loopback"
+else
+  CFG="$HOME/.config/loopback"
+fi
 
-CFG="${LOOPBACK_CONFIG_DIR:-$HOME/.config/loopback}"
-CONF="$CFG/config.env"
-LOG="$CFG/server.log"
-PID="$CFG/server.pid"
-VENV="$CFG/venv"
-TOKEN="$CFG/token"
-SERVER="$CFG/server.py"
-TUNNEL_PID="$CFG/tunnel.pid"
+PY="$CFG/venv/bin/python"
+if [ ! -x "$PY" ] && [ -s "$CFG/python-override" ]; then
+  # Test-only installs (cli.py install --skip-venv) record their interpreter here.
+  PY="$(cat "$CFG/python-override")"
+fi
 
-[[ -f "$CONF" ]] || { echo "Loopback is not installed. Run ./install.sh"; exit 1; }
-# shellcheck disable=SC1090
-source "$CONF"
+if [ -x "$PY" ] && [ -f "$CFG/cli.py" ]; then
+  exec "$PY" "$CFG/cli.py" "$@"
+fi
 
-lower(){ printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
-die(){ printf '✗ %s\n' "$*" >&2; exit 1; }
-ok(){ printf '✓ %s\n' "$*"; }
-
-owned_server(){
-  local p="${1:-}"
-  [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null || return 1
-  local c
-  c="$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null || true)"
-  [[ "$c" == *"uvicorn server:app"* && "$c" == *"$CFG"* ]]
-}
-
-stop_server(){
-  if [[ -s "$PID" ]]; then
-    local p
-    p="$(cat "$PID" 2>/dev/null || true)"
-    if owned_server "$p"; then
-      kill "$p" 2>/dev/null || true
-      for _ in $(seq 1 40); do kill -0 "$p" 2>/dev/null || break; sleep .1; done
-    fi
-  fi
-  rm -f "$PID"
-}
-
-start_server(){
-  mkdir -p "$CFG"
-  printf '%s\n' "$LOOPBACK_PUBLIC_HOST" > "$CFG/public_host"
-  export LOOPBACK_LOCAL_PORT="$LOOPBACK_PORT"
-  export LOOPBACK_COMMAND_TIMEOUT="$LOOPBACK_TIMEOUT"
-  export LOOPBACK_MAX_OUTPUT_BYTES="$LOOPBACK_MAX_OUTPUT_BYTES"
-  export LOOPBACK_ACCESS_MODE="${LOOPBACK_ACCESS_MODE:-standard}"
-  : > "$LOG"
-  nohup "$VENV/bin/python" -m uvicorn server:app --app-dir "$CFG" \
-    --host 127.0.0.1 --port "$LOOPBACK_PORT" \
-    --proxy-headers --forwarded-allow-ips=127.0.0.1 \
-    --log-level info >"$LOG" 2>&1 &
-  echo $! > "$PID"
-  for _ in $(seq 1 $((LOOPBACK_STARTUP_TIMEOUT*4))); do
-    curl -fsS "http://127.0.0.1:$LOOPBACK_PORT/healthz" >/dev/null 2>&1 && return 0
-    sleep .25
+if [ "${1:-}" = "install" ]; then
+  shift
+  SOURCE="${BASH_SOURCE[0]}"
+  while [ -h "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    case "$SOURCE" in /*) ;; *) SOURCE="$DIR/$SOURCE" ;; esac
   done
-  tail -80 "$LOG" >&2 || true
-  die "server failed to start"
-}
-
-start_cloudflare(){
-  [[ -x "$(command -v cloudflared || true)" ]] || die "cloudflared is not installed"
-  local cf_log="$CFG/cloudflared.log"
-  if [[ -n "${LOOPBACK_CLOUDFLARE_TOKEN_FILE:-}" && -s "$LOOPBACK_CLOUDFLARE_TOKEN_FILE" ]]; then
-    nohup cloudflared tunnel run --token-file "$LOOPBACK_CLOUDFLARE_TOKEN_FILE" >"$cf_log" 2>&1 &
-  else
-    [[ -n "${LOOPBACK_CLOUDFLARE_TUNNEL_ID:-}" ]] || die "Cloudflare tunnel is not configured"
-    [[ -s "$CFG/cloudflared.yml" ]] || die "Cloudflare local tunnel config is missing"
-    nohup cloudflared tunnel --config "$CFG/cloudflared.yml" run "$LOOPBACK_CLOUDFLARE_TUNNEL_ID" >"$cf_log" 2>&1 &
+  ROOT="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+  if [ -f "$ROOT/runtime/cli.py" ]; then
+    command -v python3 >/dev/null 2>&1 || { echo "loopback: python3 (3.11+) is required" >&2; exit 1; }
+    exec python3 "$ROOT/runtime/cli.py" install "$@"
   fi
-  echo $! > "$TUNNEL_PID"
-}
+fi
 
-stop_cloudflare(){
-  [[ -s "$TUNNEL_PID" ]] || return 0
-  local p
-  p="$(cat "$TUNNEL_PID" 2>/dev/null || true)"
-  [[ -n "$p" ]] && kill "$p" 2>/dev/null || true
-  rm -f "$TUNNEL_PID"
-}
+if [ -f "$CFG/server.py" ] && [ ! -f "$CFG/cli.py" ]; then
+  echo "loopback: a Loopback v3 runtime is installed in $CFG but the v4 CLI is missing." >&2
+  echo "          Upgrade it with ./install.sh from a Loopback v4 checkout or release." >&2
+  exit 1
+fi
 
-start_tailscale(){
-  command -v tailscale >/dev/null 2>&1 || die "tailscale is not installed"
-  tailscale funnel --bg --https="${LOOPBACK_TAILSCALE_HTTPS_PORT:-443}" "http://127.0.0.1:$LOOPBACK_PORT" >/dev/null
-}
-
-stop_tailscale(){
-  command -v tailscale >/dev/null 2>&1 || return 0
-  tailscale funnel reset >/dev/null 2>&1 || true
-}
-
-start_ingress(){
-  case "$(lower "${LOOPBACK_INGRESS:-local}")" in
-    cloudflare) start_cloudflare ;;
-    tailscale) start_tailscale ;;
-    local|none) ;;
-    *) die "unknown ingress: $LOOPBACK_INGRESS" ;;
-  esac
-}
-
-stop_ingress(){
-  case "$(lower "${LOOPBACK_INGRESS:-local}")" in
-    cloudflare) stop_cloudflare ;;
-    tailscale) stop_tailscale ;;
-    local|none) ;;
-  esac
-}
-
-up(){
-  stop_server
-  start_server
-  start_ingress
-  ok "Loopback is up"
-  printf '  local:  http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
-  printf '  admin:  http://127.0.0.1:%s/admin\n' "$LOOPBACK_PORT"
-  if [[ "${LOOPBACK_INGRESS:-local}" != "local" ]]; then
-    printf '  public: https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
-  fi
-}
-
-down(){
-  stop_ingress
-  stop_server
-  ok "Loopback is down"
-}
-
-restart(){ down || true; up; }
-
-status(){
-  local state=DOWN p=""
-  [[ -s "$PID" ]] && p="$(cat "$PID" 2>/dev/null || true)"
-  owned_server "$p" && state=UP || true
-  printf 'loopback: %s%s\n' "$state" "${p:+ (PID $p)}"
-  printf '  profile: %s\n' "${LOOPBACK_ACCESS_MODE:-standard}"
-  printf '  ingress: %s\n' "${LOOPBACK_INGRESS:-local}"
-  printf '  local:   http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
-  printf '  admin:   http://127.0.0.1:%s/admin\n' "$LOOPBACK_PORT"
-  [[ "${LOOPBACK_INGRESS:-local}" == "local" ]] || printf '  public:  https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
-  printf '  timeout: %ss\n' "$LOOPBACK_TIMEOUT"
-  printf '  maxout:  %s bytes\n' "$LOOPBACK_MAX_OUTPUT_BYTES"
-}
-
-doctor(){
-  echo "== Loopback doctor =="
-  [[ -x "$VENV/bin/python" ]] && ok "python venv" || echo "✗ python venv"
-  [[ -f "$SERVER" ]] && ok "server runtime" || echo "✗ server runtime"
-  [[ -s "$TOKEN" ]] && ok "auth token" || echo "✗ auth token"
-  command -v git >/dev/null 2>&1 && ok "git" || echo "• git not found"
-  case "$(lower "${LOOPBACK_INGRESS:-local}")" in
-    cloudflare) command -v cloudflared >/dev/null 2>&1 && ok "cloudflared" || echo "✗ cloudflared" ;;
-    tailscale) command -v tailscale >/dev/null 2>&1 && ok "tailscale" || echo "✗ tailscale" ;;
-  esac
-  curl -fsS "http://127.0.0.1:$LOOPBACK_PORT/healthz" >/dev/null 2>&1 && ok "local health" || echo "✗ local health"
-  [[ "${LOOPBACK_INGRESS:-local}" == "local" ]] || {
-    curl -fsS --max-time 15 "https://$LOOPBACK_PUBLIC_HOST/healthz" >/dev/null 2>&1 && ok "public health" || echo "✗ public health"
-  }
-}
-
-logs(){
-  if [[ "${1:-}" == "-f" || "${1:-}" == "--follow" ]]; then exec tail -f "$LOG"; fi
-  tail -n "${1:-100}" "$LOG" 2>/dev/null || true
-}
-
-url(){
-  if [[ "${LOOPBACK_INGRESS:-local}" == "local" ]]; then
-    printf 'http://127.0.0.1:%s/mcp\n' "$LOOPBACK_PORT"
-  else
-    printf 'https://%s/mcp\n' "$LOOPBACK_PUBLIC_HOST"
-  fi
-}
-
-token(){ cat "$TOKEN"; echo; }
-
-rotate_token(){
-  umask 077
-  python3 - <<'PY' > "$TOKEN"
-import secrets
-print(secrets.token_hex(32))
-PY
-  chmod 600 "$TOKEN"
-  restart
-  ok "token rotated"
-}
-
-config(){
-  local action="$(lower "${1:-list}")"
-  shift || true
-  case "$action" in
-    list) cat "$CONF" ;;
-    get) grep -E "^${1:?key}=" "$CONF" || true ;;
-    set)
-      local key="${1:?key}" value="${2:?value}"
-      python3 - "$CONF" "$key" "$value" <<'PY'
-from pathlib import Path
-import sys
-p=Path(sys.argv[1]); k=sys.argv[2]; v=sys.argv[3]
-lines=p.read_text().splitlines()
-out=[]; done=False
-for line in lines:
-    if line.startswith(k+"="):
-        out.append(k+"="+v); done=True
-    else:
-        out.append(line)
-if not done: out.append(k+"="+v)
-p.write_text("\n".join(out)+"\n")
-PY
-      ok "saved $key"
-      ;;
-    *) die "Config List|Get KEY|Set KEY VALUE" ;;
-  esac
-}
-
-
-autostart(){
-  local action="$(lower "${1:-status}")"
-  local unit_dir="$HOME/.config/systemd/user"
-  local unit="$unit_dir/loopback.service"
-  case "$action" in
-    on|enable)
-      mkdir -p "$unit_dir"
-      cat > "$unit" <<EOF
-[Unit]
-Description=Loopback MCP bridge
-Wants=network-online.target
-After=network-online.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/.local/bin/loopback up
-ExecStop=%h/.local/bin/loopback down
-TimeoutStartSec=180
-TimeoutStopSec=30
-
-[Install]
-WantedBy=default.target
-EOF
-      systemctl --user daemon-reload
-      systemctl --user enable --now loopback.service
-      if command -v loginctl >/dev/null 2>&1; then
-        if sudo -n true >/dev/null 2>&1; then
-          sudo loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
-        fi
-      fi
-      ok "autostart enabled"
-      ;;
-    off|disable)
-      systemctl --user disable --now loopback.service 2>/dev/null || true
-      rm -f "$unit"
-      systemctl --user daemon-reload 2>/dev/null || true
-      ok "autostart disabled"
-      ;;
-    status)
-      if systemctl --user is-enabled --quiet loopback.service 2>/dev/null; then
-        echo "autostart: enabled"
-      else
-        echo "autostart: disabled"
-      fi
-      systemctl --user status loopback.service --no-pager 2>/dev/null || true
-      ;;
-    *) die "autostart on|off|status" ;;
-  esac
-}
-
-
-dashboard(){
-  if [[ "${LOOPBACK_INGRESS:-local}" == "local" ]]; then
-    printf 'http://127.0.0.1:%s/admin\n' "$LOOPBACK_PORT"
-  else
-    printf 'https://%s/admin\n' "$LOOPBACK_PUBLIC_HOST"
-  fi
-}
-
-policy(){
-  local action="$(lower "${1:-show}")"
-  shift || true
-  case "$action" in
-    show|list)
-      if [[ -s "$CFG/policy.json" ]]; then
-        cat "$CFG/policy.json"
-      else
-        printf '{"profile":"%s","source":"defaults"}\n' "${LOOPBACK_ACCESS_MODE:-standard}"
-      fi
-      ;;
-    profile)
-      local profile="${1:?standard|trusted|read-only|locked}"
-      case "$profile" in standard|trusted|read-only|locked) ;; *) die "invalid profile: $profile" ;; esac
-      "$VENV/bin/python" - "$CFG/policy.json" "$profile" <<'PY'
-import json, os, sys
-from pathlib import Path
-p=Path(sys.argv[1]); profile=sys.argv[2]
-try: data=json.loads(p.read_text())
-except Exception: data={}
-data["profile"]=profile
-tmp=p.with_suffix(".tmp")
-tmp.write_text(json.dumps(data, indent=2, sort_keys=True)+"\n")
-os.chmod(tmp,0o600); tmp.replace(p)
-PY
-      ok "policy profile: $profile"
-      ;;
-    *) die "policy show|profile PROFILE" ;;
-  esac
-}
-
-node(){
-  local action="$(lower "${1:-list}")"
-  shift || true
-  case "$action" in
-    list)
-      if [[ -s "$CFG/nodes.json" ]]; then cat "$CFG/nodes.json"; else echo '[]'; fi
-      ;;
-    add)
-      local name="${1:?name}" endpoint="${2:?mcp-url}"
-      local token_value=""
-      if [[ "${3:-}" == "--token-env" ]]; then
-        local env_name="${4:?environment variable name}"
-        token_value="${!env_name:-}"
-      elif [[ -n "${3:-}" ]]; then
-        die "use: loopback node add NAME URL [--token-env ENV]"
-      elif [[ -t 0 ]]; then
-        printf 'Bearer token (optional, hidden): ' >&2
-        IFS= read -rs token_value || true
-        printf '\n' >&2
-      fi
-      LOOPBACK_NODE_TOKEN="$token_value" "$VENV/bin/python" - "$CFG/nodes.json" "$CFG/nodes.secrets.json" "$name" "$endpoint" <<'PY'
-import json, os, sys
-from pathlib import Path
-nodes_path = Path(sys.argv[1])
-secrets_path = Path(sys.argv[2])
-name = sys.argv[3]
-url = sys.argv[4]
-try: rows=json.loads(nodes_path.read_text())
-except Exception: rows=[]
-rows=[n for n in rows if n.get("name") != name]
-rows.append({"name":name,"url":url.rstrip("/"),"enabled":True,"description":""})
-nodes_path.write_text(json.dumps(rows,indent=2,sort_keys=True)+"\n"); os.chmod(nodes_path,0o600)
-token=os.environ.get("LOOPBACK_NODE_TOKEN","")
-if token:
-    try: sec=json.loads(secrets_path.read_text())
-    except Exception: sec={}
-    sec[name]=token
-    secrets_path.write_text(json.dumps(sec,indent=2)+"\n"); os.chmod(secrets_path,0o600)
-PY
-      unset LOOPBACK_NODE_TOKEN
-      ok "node added: $name"
-      ;;
-    remove|rm)
-      local name="${1:?name}"
-      "$VENV/bin/python" - "$CFG/nodes.json" "$CFG/nodes.secrets.json" "$name" <<'PY'
-import json, os, sys
-from pathlib import Path
-np,sp,name=Path(sys.argv[1]),Path(sys.argv[2]),sys.argv[3]
-try: rows=json.loads(np.read_text())
-except Exception: rows=[]
-np.write_text(json.dumps([n for n in rows if n.get("name") != name],indent=2)+"\n"); os.chmod(np,0o600)
-try: sec=json.loads(sp.read_text())
-except Exception: sec={}
-sec.pop(name,None)
-sp.write_text(json.dumps(sec,indent=2)+"\n"); os.chmod(sp,0o600)
-PY
-      ok "node removed: $name"
-      ;;
-    *) die "node list|add NAME URL [--token-env ENV]|remove NAME" ;;
-  esac
-}
-
-help(){
-cat <<'EOF'
-LOOPBACK
-
-  loopback up
-  loopback down
-  loopback restart
-  loopback status
-  loopback doctor
-  loopback logs [N|-f]
-  loopback url
-  loopback token
-  loopback rotate-token
-  loopback dashboard
-  loopback policy show|profile PROFILE
-  loopback node list|add|remove
-  loopback config list|get|set
-  loopback autostart on|off|status
-  loopback help
-
-Runtime MCP tools:
-  Files: read_file, write_file, list_dir, patch_file, search_text, tail_file
-  Shell: execute, job_start/list/output/stop, terminal_start/write/read/resize/close
-  System: process_list, process_kill, git_info, diagnostics, machine_info
-  Documents: docx_text/replace, xlsx_read/write_range, pdf_text/merge/extract_pages
-  Browser: browser_status/open/snapshot/click/fill/get_url/close (optional)
-  Desktop: desktop_status/windows/screenshot/activate_window/click/type/key (optional Linux/X11)
-  Policy/Fleet: policy_status, node_list/call/read_file/execute/diagnostics
-
-The development machine may enable additional locally managed trusted tools.
-EOF
-}
-
-cmd="$(lower "${1:-help}")"; shift || true
-case "$cmd" in
-  up) up "$@" ;;
-  down) down "$@" ;;
-  restart) restart "$@" ;;
-  status) status "$@" ;;
-  doctor) doctor "$@" ;;
-  logs) logs "$@" ;;
-  url) url ;;
-  token) token ;;
-  rotate-token|rotatetoken) rotate_token ;;
-  dashboard) dashboard ;;
-  policy) policy "$@" ;;
-  node|nodes) node "$@" ;;
-  config) config "$@" ;;
-  autostart) autostart "$@" ;;
-  help|-h|--help) help ;;
-  *) die "unknown command: $cmd" ;;
-esac
+echo "loopback: not installed (looked in $CFG)." >&2
+echo "  Install:  curl -fsSL https://github.com/p5n-n3t/loopback/releases/latest/download/install.sh | bash" >&2
+echo "       or:  git clone https://github.com/p5n-n3t/loopback && cd loopback && ./install.sh" >&2
+exit 1

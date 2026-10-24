@@ -1,0 +1,37 @@
+{
+  "name": "loopback-mcp",
+  "version": "4.0.0",
+  "description": "Installer and launcher for Loopback, a self-hostable MCP control plane for computers and servers.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "remote-control",
+    "self-hosted",
+    "loopback"
+  ],
+  "homepage": "https://github.com/p5n-n3t/loopback#readme",
+  "bugs": {
+    "url": "https://github.com/p5n-n3t/loopback/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/p5n-n3t/loopback.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "loopback-mcp": "bin/loopback-mcp.js"
+  },
+  "files": [
+    "bin/loopback-mcp.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "dependencies": {}
+}

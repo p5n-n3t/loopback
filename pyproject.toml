@@ -1,0 +1,56 @@
+[project]
+name = "loopback-mcp"
+version = "4.0.0"
+description = "Self-hostable MCP control plane for computers and servers: OAuth 2.1, sandboxed shell, fleet, dashboard."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Loopback contributors" }]
+keywords = ["mcp", "model-context-protocol", "remote-control", "self-hosted", "oauth", "landlock"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Web Environment",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: System :: Systems Administration",
+]
+dynamic = []
+
+[project.urls]
+Homepage = "https://github.com/p5n-n3t/loopback"
+Documentation = "https://github.com/p5n-n3t/loopback/tree/main/docs"
+Changelog = "https://github.com/p5n-n3t/loopback/blob/main/CHANGELOG.md"
+Issues = "https://github.com/p5n-n3t/loopback/issues"
+
+# Loopback is distributed as a release tarball (install.sh / install.ps1 / npx loopback-mcp),
+# not as a wheel: the runtime is copied into the per-user config directory and run from a
+# dedicated virtualenv. This file carries metadata and tool configuration only.
+
+[tool.ruff]
+line-length = 160
+target-version = "py311"
+extend-exclude = ["runtime/static"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "S"]
+ignore = [
+  "E501",   # long lines are allowed up to line-length; dashboards/docs strings exceed it deliberately
+  "S101",   # asserts in tests
+  "S603", "S607", "S602",  # subprocess use is the product
+  "S108",   # /tmp handling is deliberate and documented in sandbox.py
+  "S104",   # binding 0.0.0.0 is an explicit, validated configuration choice
+  "S105", "S106", "S107",  # token-type string literals, not secrets
+  "S324",   # sha256 of random tokens for lookup keys
+  "S310",   # URL schemes are validated before use
+  "B008", "B904", "UP035", "UP006", "UP007",
+  "S110",   # defensive try/except/pass around optional subsystems is deliberate
+  "S606",   # os.execvpe in the PTY child
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B", "E402"]
+"scripts/*" = ["S"]

@@ -1,0 +1,67 @@
+{
+  "_comment": "Example policy.json for Loopback v4. See docs/PERMISSIONS.md for the full model. 'profile' sets the baseline; the explicit fields below show what each profile expands to and what you can still override individually when profile is 'custom'.",
+  "schema_version": 2,
+  "profile": "restricted",
+  "allowed_roots": [
+    { "path": "~", "mode": "rw" },
+    { "path": "~/projects", "mode": "rw" },
+    { "path": "/var/log", "mode": "ro" }
+  ],
+  "denied_roots": [
+    "~/.ssh",
+    "~/.gnupg",
+    "~/.aws",
+    "~/.azure",
+    "~/.kube",
+    "~/.docker/config.json",
+    "~/.config/1Password",
+    "~/.config/gh/hosts.yml",
+    "~/.config/loopback",
+    "~/.netrc"
+  ],
+  "allow_shell": true,
+  "allow_process_control": true,
+  "allow_fleet": true,
+  "allow_browser": false,
+  "allow_desktop": false,
+  "allowed_tools": ["*"],
+  "denied_tools": [],
+  "require_approval_patterns": [
+    "(^|\\s)sudo(\\s|$)",
+    "\\b(rm|unlink)\\b.*\\s(-[^\\n]*r|--recursive)",
+    "\\b(systemctl|service)\\s+(stop|disable|mask)\\b",
+    "\\b(docker|podman)\\s+(rm|system\\s+prune|volume\\s+rm)\\b",
+    "\\b(apt|apt-get|dnf|yum|pacman|zypper|apk)\\b.*\\b(remove|purge|autoremove|del)\\b",
+    "\\b(shutdown|reboot|poweroff|halt)\\b",
+    "\\bgit\\s+push\\b.*\\s(--force|-f)\\b"
+  ],
+  "deny_command_patterns": [
+    "(^|\\s)rm\\s+-[a-z]*r[a-z]*\\s+(/|~|\\$HOME)(\\s|$)",
+    "\\bmkfs(\\.|\\s)",
+    "\\bwipefs\\b",
+    "\\bdd\\b[^\\n]*\\bof=/dev/",
+    ":\\(\\)\\s*\\{\\s*:\\|:&\\s*\\};:",
+    "\\bchmod\\s+(-R\\s+)?[0-7]*777\\s+/(\\s|$)"
+  ],
+  "approval_ttl_seconds": 900,
+  "sandbox_required": true,
+  "targets": {
+    "build-server": {
+      "profile": "restricted",
+      "allowed_roots": [
+        { "path": "~/deploys", "mode": "rw" }
+      ],
+      "denied_roots": [
+        "~/.ssh",
+        "~/.gnupg",
+        "~/.aws"
+      ],
+      "allow_shell": true,
+      "allow_process_control": false,
+      "require_approval_patterns": [
+        "(^|\\s)sudo(\\s|$)"
+      ],
+      "enforcement": "gateway-path-check"
+    }
+  }
+}

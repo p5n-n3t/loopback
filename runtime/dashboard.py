@@ -1,111 +1,232 @@
+"""Loopback admin dashboard: HTML shell, static assets and routes.
+
+The dashboard is a small vanilla-JS single page application. Python only
+serves an HTML shell (``render_dashboard``) and the files in ``runtime/static``;
+all data flows through the JSON endpoints documented in ``docs/ADMIN-API.md``.
+
+Security properties:
+
+* The shell is only served to requests with a valid dashboard session;
+  everyone else is redirected (303) to ``/admin/login?next=/admin``.
+* A strict Content-Security-Policy forbids inline script and inline style, so
+  ``static/index.html`` contains neither; behaviour lives in ``app.js`` and
+  ``topology.js``, presentation in ``app.css``.
+* Static files are resolved strictly inside ``runtime/static``; traversal,
+  hidden files and unknown extensions are refused with 404.
+* No secrets are embedded in the shell: only the (HTML-escaped) public host.
+
+The module has no import-time side effects; the static cache fills lazily.
+"""
 from __future__ import annotations
 
+import hashlib
 import html
+import threading
+from pathlib import Path
+from typing import Any
+
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, RedirectResponse, Response
+from starlette.routing import Match, Route
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
+       "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+
+SHELL_HEADERS = {
+    "Cache-Control": "no-store",
+    "Pragma": "no-cache",
+    "Content-Security-Policy": CSP,
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+}
+
+STATIC_TYPES = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+    ".json": "application/json",
+    ".html": "text/html; charset=utf-8",
+}
+
+# First path segments under /admin/ that belong to other modules (auth_http) or
+# to the static handler; the hash-app catch-all must never shadow them.
+RESERVED_SEGMENTS = {"login", "logout", "enroll", "static", "api"}
+
+LOGIN_PATH = "/admin/login?next=/admin"
+MAX_STATIC_BYTES = 2 * 1024 * 1024
+
+_cache_lock = threading.Lock()
+# path -> (mtime_ns, size, body, etag); bounded by the number of files in STATIC_DIR.
+_static_cache: dict[str, tuple[int, int, bytes, str]] = {}
+
+_FALLBACK_SHELL = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Loopback</title>
+<link rel="stylesheet" href="/admin/static/app.css"></head><body data-host="{{HOST}}">
+<main id="main"><h1>LOOPBACK CONTROL PLANE</h1><p>Dashboard assets are missing.</p>
+<h2>Recent MCP activity</h2><h2>Persistent terminals</h2><h2>Nodes</h2></main></body></html>"""
+
+
+# --------------------------------------------------------------------------- static files
+def _safe_static_path(rel: str) -> Path | None:
+    """Return the file under STATIC_DIR for *rel*, or None when it is not servable.
+
+    Refuses absolute paths, ``..`` segments, backslashes, NUL bytes, hidden
+    files, unknown extensions and anything that resolves (via symlinks)
+    outside STATIC_DIR.
+    """
+    if not rel or len(rel) > 200 or "\x00" in rel or "\\" in rel or rel.startswith("/"):
+        return None
+    parts = rel.split("/")
+    if any(p in {"", ".", ".."} or p.startswith(".") for p in parts):
+        return None
+    candidate = STATIC_DIR.joinpath(*parts)
+    if candidate.suffix.lower() not in STATIC_TYPES:
+        return None
+    try:
+        resolved = candidate.resolve(strict=True)
+        base = STATIC_DIR.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if not resolved.is_relative_to(base) or not resolved.is_file():
+        return None
+    return resolved
+
+
+def _load_static(path: Path) -> tuple[bytes, str] | None:
+    """Read a static file with an mtime/size keyed cache; return (body, etag)."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    if st.st_size > MAX_STATIC_BYTES:
+        return None
+    key = str(path)
+    with _cache_lock:
+        hit = _static_cache.get(key)
+        if hit and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+            return hit[2], hit[3]
+    try:
+        body = path.read_bytes()
+    except OSError:
+        return None
+    etag = '"' + hashlib.sha256(body).hexdigest()[:24] + '"'
+    with _cache_lock:
+        _static_cache[key] = (st.st_mtime_ns, st.st_size, body, etag)
+    return body, etag
+
+
+def _etag_matches(header: str | None, etag: str) -> bool:
+    if not header:
+        return False
+    if header.strip() == "*":
+        return True
+    tags = [t.strip().removeprefix("W/") for t in header.split(",")]
+    return etag in tags
+
+
+# --------------------------------------------------------------------------- HTML
+def render_dashboard(host: str) -> str:
+    """Return the dashboard shell HTML for *host* (escaped).
+
+    The shell is ``static/index.html`` with ``{{HOST}}`` substituted. It holds
+    the navigation and the empty view container; ``app.js`` renders views.
+    """
+    safe_host = html.escape(str(host or ""), quote=True)
+    try:
+        template = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    except OSError:
+        template = _FALLBACK_SHELL
+    return template.replace("{{HOST}}", safe_host)
 
 
 def render_login(host: str, error: str = "") -> str:
-    err = f'<div class="err">{html.escape(error)}</div>' if error else ""
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Loopback // Admin</title>
-<style>
-:root{{--bg:#07090b;--panel:#101419;--line:#2b343d;--text:#f4f7f8;--muted:#8e9ba7;--yellow:#ffd600;--cyan:#6ee7ff}}
-*{{box-sizing:border-box}} body{{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#1b232a,#07090b 55%);font:14px ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--text);padding:24px}}
-.card{{width:min(520px,100%);background:linear-gradient(180deg,#12171c,#0b0f12);border:1px solid var(--line);border-radius:22px;padding:30px;box-shadow:0 30px 100px #000b}}
-.brand{{color:var(--yellow);letter-spacing:.18em;font-size:12px}} h1{{font-size:28px;margin:16px 0 8px;letter-spacing:-.04em}} p{{color:var(--muted);line-height:1.6}}
-input{{width:100%;padding:14px;border:1px solid #39444d;border-radius:10px;background:#080b0e;color:#fff;font:inherit;outline:none}} input:focus{{border-color:var(--yellow);box-shadow:0 0 0 3px #ffd6001f}}
-button{{width:100%;margin-top:14px;padding:14px;border:0;border-radius:10px;background:var(--yellow);font:700 13px inherit;cursor:pointer}} .err{{padding:10px 12px;border:1px solid #633;background:#291414;border-radius:9px;color:#ffb5b5;margin:14px 0}}
-.small{{font-size:11px;color:#687681;margin-top:14px}} code{{color:var(--cyan)}}
-</style></head><body><main class="card"><div class="brand">◆ LOOPBACK CONTROL PLANE</div><h1>Machine administration</h1>
-<p>Authenticate with this machine's Loopback token. The dashboard session is stored in an HttpOnly cookie; the token itself is not stored in the browser.</p>{err}
-<form method="post" action="/admin/login"><input type="password" name="token" autocomplete="current-password" autofocus required placeholder="Loopback token"><button>OPEN DASHBOARD</button></form>
-<div class="small">Host: {html.escape(host)} · retrieve locally with <code>loopback token</code></div></main></body></html>"""
+    """Backwards-compatible login page; delegates to ``auth_http.render_login``."""
+    try:
+        from auth_http import render_login as _auth_login  # lazy: avoids import cycles
+        page = _auth_login(host, error)
+    except Exception:  # pragma: no cover - defensive fallback if auth_http is unavailable
+        err = f'<p class="err">{html.escape(error)}</p>' if error else ""
+        page = (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Loopback · Sign in</title></head><body>'
+                f'<div class="brand">LOOPBACK</div><h1>Sign in</h1>{err}'
+                f'<form method="post" action="/admin/login"><input type="password" name="credential" required>'
+                f'<button>Open dashboard</button></form><p>Host: {html.escape(host)}</p></body></html>')
+    if "LOOPBACK CONTROL PLANE" not in page:
+        page = page.replace('<div class="brand">LOOPBACK</div>', '<div class="brand">LOOPBACK CONTROL PLANE</div>', 1)
+    if "LOOPBACK CONTROL PLANE" not in page:
+        page = page.replace("<body>", '<body><div class="brand">LOOPBACK CONTROL PLANE</div>', 1)
+    return page
 
 
-def render_dashboard(host: str) -> str:
-    safe_host = html.escape(host)
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Loopback // Control Plane</title>
-<style>
-:root{{--bg:#07090b;--panel:#0e1317;--panel2:#12181d;--line:#29323a;--text:#f3f6f7;--muted:#84929e;--yellow:#ffd600;--cyan:#62e5ff;--green:#71f6a3;--red:#ff7272}}
-*{{box-sizing:border-box}} body{{margin:0;background:#07090b;color:var(--text);font:13px ui-monospace,SFMono-Regular,Consolas,monospace}}
-header{{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;padding:18px 24px;border-bottom:1px solid var(--line);background:#090c0feF;backdrop-filter:blur(16px)}} .brand{{font-weight:800;letter-spacing:.14em;color:var(--yellow)}} .host{{color:var(--muted);font-size:11px}}
-main{{max-width:1500px;margin:auto;padding:22px}} .grid{{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}} .card{{grid-column:span 3;background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}} .wide{{grid-column:span 6}} .full{{grid-column:1/-1}}
-.label{{font-size:10px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase}} .big{{font-size:24px;font-weight:750;margin-top:7px}} .ok{{color:var(--green)}} .bad{{color:var(--red)}} .cyan{{color:var(--cyan)}}
-table{{width:100%;border-collapse:collapse;margin-top:10px}} th,td{{padding:8px 7px;text-align:left;border-bottom:1px solid #202830;vertical-align:top}} th{{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}} td{{overflow-wrap:anywhere}}
-button,select,input,textarea{{font:inherit;border-radius:8px;border:1px solid #34404a;background:#0a0e11;color:#e9eef1;padding:8px 9px}} textarea{{width:100%;min-height:84px;resize:vertical}} button{{cursor:pointer}} button.primary{{background:var(--yellow);color:#090909;border-color:var(--yellow);font-weight:800}} button.danger{{border-color:#663434;color:#ffaaaa}} .row{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}} .grow{{flex:1}} .pill{{display:inline-block;padding:3px 7px;border:1px solid #34404a;border-radius:99px;font-size:10px;color:var(--muted)}} .log{{max-height:360px;overflow:auto}} .mono{{white-space:pre-wrap}} .muted{{color:var(--muted)}} h2{{font-size:14px;margin:0 0 12px}} a{{color:var(--cyan)}} 
-@media(max-width:1000px){{.card,.wide{{grid-column:span 6}}}} @media(max-width:650px){{main{{padding:12px}}.card,.wide{{grid-column:1/-1}}header{{padding:14px}}}}
-</style></head>
-<body><header><div><span class="brand">◆ LOOPBACK</span> <span class="host">{safe_host}</span></div><div class="row"><span id="updated" class="host"></span><a href="/admin/logout">logout</a></div></header>
-<main><div class="grid">
-<section class="card"><div class="label">Host</div><div id="hostname" class="big">—</div><div id="uptime" class="muted"></div></section>
-<section class="card"><div class="label">Policy</div><div id="profile" class="big">—</div><div class="row" style="margin-top:10px"><select id="profileSelect"><option>standard</option><option>trusted</option><option>read-only</option><option>locked</option></select><button class="primary" onclick="saveProfile()">Apply</button></div></section>
-<section class="card"><div class="label">Active work</div><div class="big"><span id="jobs">0</span> <span class="muted">jobs</span></div><div><span id="terms">0</span> terminals · <span id="approvals">0</span> approvals</div></section>
-<section class="card"><div class="label">24h MCP calls</div><div id="calls" class="big">0</div><div><span id="failures">0</span> non-success</div></section>
+# --------------------------------------------------------------------------- routing
+class _ShellRoute(Route):
+    """``/admin/{path:path}`` catch-all for the hash app that never shadows
+    login/logout/enroll/static/api, whatever order the server mounts routes in."""
 
-<section class="card wide"><h2>System</h2><div id="system" class="mono muted">loading…</div></section>
-<section class="card wide"><h2>Capability status</h2><div id="capabilities" class="mono muted">loading…</div></section>
+    def matches(self, scope: Any) -> tuple[Match, dict[str, Any]]:
+        if scope.get("type") == "http":
+            path = scope.get("path", "")
+            if path.startswith("/admin/"):
+                first = path[len("/admin/"):].split("/", 1)[0]
+                if first in RESERVED_SEGMENTS:
+                    return Match.NONE, {}
+        return super().matches(scope)
 
-<section class="card full"><h2>Policy boundaries</h2>
-<div class="grid" style="padding:0">
-  <div class="card wide" style="grid-column:span 6"><div class="label">Allowed roots · one per line</div><textarea id="allowedRoots"></textarea></div>
-  <div class="card wide" style="grid-column:span 6"><div class="label">Denied roots · one per line</div><textarea id="deniedRoots"></textarea></div>
-  <div class="card wide" style="grid-column:span 6"><div class="label">Allowed tools · * or one per line</div><textarea id="allowedTools"></textarea></div>
-  <div class="card wide" style="grid-column:span 6"><div class="label">Denied tools · one per line</div><textarea id="deniedTools"></textarea></div>
-</div>
-<div class="row" style="margin-top:10px"><label><input id="allowBrowser" type="checkbox"> enable optional browser automation</label><label><input id="allowDesktop" type="checkbox"> enable native desktop automation</label><button class="primary" onclick="saveBoundaries()">Save boundaries</button></div>
-</section>
 
-<section class="card wide"><h2>Nodes</h2><div class="row"><input id="nodeName" placeholder="name"><input id="nodeUrl" class="grow" placeholder="https://host.example/mcp"><input id="nodeToken" type="password" placeholder="bearer token"><button onclick="addNode()">Add</button></div><div id="nodes"></div></section>
+def routes(ctx: Any) -> list[Route]:
+    """Dashboard routes: the session-gated shell and the static assets."""
+    from auth_http import session_from_request  # lazy import keeps this module importable standalone
 
-<section class="card wide"><h2>Background jobs</h2><div id="jobTable"></div></section>
-<section class="card wide"><h2>Persistent terminals</h2><div id="termTable"></div></section>
+    async def shell(request: Request) -> Response:
+        try:
+            session = session_from_request(ctx, request)
+        except Exception:
+            session = None
+        if not session:
+            return RedirectResponse(LOGIN_PATH, status_code=303, headers={"Cache-Control": "no-store"})
+        try:
+            host = ctx.config.primary_host()
+        except Exception:
+            host = getattr(ctx.identity, "hostname", "") or ""
+        body = render_dashboard(host)
+        if request.method == "HEAD":
+            return Response(status_code=200, media_type="text/html", headers=SHELL_HEADERS)
+        return HTMLResponse(body, headers=SHELL_HEADERS)
 
-<section class="card full"><h2>Pending approvals</h2><div id="approvalTable"></div></section>
-<section class="card full"><h2>Recent MCP activity</h2><div id="auditTable" class="log"></div></section>
-</div></main>
-<script>
-const j=async(u,o={{}})=>{{const r=await fetch(u,{{...o,headers:{{'Content-Type':'application/json',...(o.headers||{{}})}}}});if(!r.ok)throw new Error(await r.text());return r.json()}};
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));
-const table=(heads,rows)=>'<table><thead><tr>'+heads.map(x=>'<th>'+esc(x)+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table>';
-async function refresh(){{
- try{{
-  const d=await j('/api/admin/overview');
-  hostname.textContent=d.system.hostname; uptime.textContent='uptime '+Math.round(d.system.uptime_seconds/60)+'m';
-  profile.textContent=d.policy.profile; profileSelect.value=d.policy.profile;
-  allowedRoots.value=(d.policy.allowed_roots||[]).join('\n');
-  deniedRoots.value=(d.policy.denied_roots||[]).join('\n');
-  allowedTools.value=(d.policy.allowed_tools||['*']).join('\n');
-  deniedTools.value=(d.policy.denied_tools||[]).join('\n');
-  allowBrowser.checked=!!d.policy.allow_browser;
-  allowDesktop.checked=!!d.policy.allow_desktop;
-  capabilities.textContent='browser adapter: '+(d.browser.available?'available':'not installed')+' / '+(d.policy.allow_browser?'enabled':'disabled')+'\nnative desktop: '+(d.desktop.available?'available':'unavailable')+' / '+(d.policy.allow_desktop?'enabled':'disabled')+'\ndocument tools: DOCX / XLSX / PDF';
-  jobs.textContent=d.jobs.filter(x=>x.running).length; terms.textContent=d.terminals.filter(x=>x.alive).length; approvals.textContent=d.approvals.length;
-  calls.textContent=d.audit.total; failures.textContent=d.audit.failures;
-  system.textContent='load: '+d.system.load.join('  ')+'\nmemory: '+d.system.memory_used_human+' / '+d.system.memory_total_human+'\ndisk: '+d.system.disk_used_human+' / '+d.system.disk_total_human+'\npython: '+d.system.python;
-  nodes.innerHTML=table(['name','url','state',''],d.nodes.map(n=>'<tr><td>'+esc(n.name)+'</td><td>'+esc(n.url)+'</td><td><span class="pill">'+esc(n.enabled?'enabled':'disabled')+'</span></td><td><button class="danger" onclick="removeNode(\''+esc(n.name)+'\')">remove</button></td></tr>'));
-  jobTable.innerHTML=table(['id','pid','command','state',''],d.jobs.map(x=>'<tr><td>'+esc(x.id)+'</td><td>'+x.pid+'</td><td>'+esc(x.command)+'</td><td>'+(x.running?'<span class="ok">running</span>':'exit '+esc(x.returncode))+'</td><td>'+(x.running?'<button class="danger" onclick="stopJob(\''+x.id+'\')">stop</button>':'')+'</td></tr>'));
-  termTable.innerHTML=table(['id','pid','cwd','state',''],d.terminals.map(x=>'<tr><td>'+esc(x.id)+'</td><td>'+x.pid+'</td><td>'+esc(x.cwd)+'</td><td>'+(x.alive?'<span class="ok">alive</span>':'closed')+'</td><td>'+(x.alive?'<button class="danger" onclick="closeTerm(\''+x.id+'\')">close</button>':'')+'</td></tr>'));
-  approvalTable.innerHTML=d.approvals.length?table(['id','request','expires',''],d.approvals.map(x=>'<tr><td>'+esc(x.id)+'</td><td>'+esc(x.summary)+'</td><td>'+new Date(x.expires_at*1000).toLocaleTimeString()+'</td><td><button class="primary" onclick="approve(\''+x.id+'\')">approve once</button> <button onclick="approve(\''+x.id+'\',20,3600)">approve 1h</button></td></tr>')):'<span class="muted">No pending Loopback approvals.</span>';
-  auditTable.innerHTML=table(['time','tool','status','ms','target'],d.recent.map(x=>'<tr><td>'+new Date(x.ts*1000).toLocaleTimeString()+'</td><td class="cyan">'+esc(x.tool)+'</td><td>'+esc(x.status)+'</td><td>'+x.duration_ms+'</td><td>'+esc(x.target||'')+'</td></tr>'));
-  updated.textContent='updated '+new Date().toLocaleTimeString();
- }}catch(e){{updated.textContent='dashboard error: '+e.message}}
-}}
-async function saveProfile(){{await j('/api/admin/policy',{{method:'POST',body:JSON.stringify({{profile:profileSelect.value}})}});refresh()}}
-const lines=v=>v.split('\n').map(x=>x.trim()).filter(Boolean);
-async function saveBoundaries(){{
- await j('/api/admin/policy',{{method:'POST',body:JSON.stringify({{
-   allowed_roots:lines(allowedRoots.value),denied_roots:lines(deniedRoots.value),
-   allowed_tools:lines(allowedTools.value),denied_tools:lines(deniedTools.value),
-   allow_browser:allowBrowser.checked,allow_desktop:allowDesktop.checked
- }})}});
- refresh();
-}}
-async function approve(id,uses=1,ttl=null){{await j('/api/admin/approvals/'+id+'/approve',{{method:'POST',body:JSON.stringify({{uses,ttl_seconds:ttl}})}});refresh()}}
-async function stopJob(id){{await j('/api/admin/jobs/'+id+'/stop',{{method:'POST',body:'{{}}'}});refresh()}}
-async function closeTerm(id){{await j('/api/admin/terminals/'+id+'/close',{{method:'POST',body:'{{}}'}});refresh()}}
-async function addNode(){{await j('/api/admin/nodes',{{method:'POST',body:JSON.stringify({{name:nodeName.value,url:nodeUrl.value,token:nodeToken.value}})}});nodeToken.value='';refresh()}}
-async function removeNode(name){{await j('/api/admin/nodes/'+encodeURIComponent(name),{{method:'DELETE'}});refresh()}}
-refresh();setInterval(refresh,3000);
-</script></body></html>"""
+    async def static(request: Request) -> Response:
+        rel = str(request.path_params.get("path", ""))
+        path = _safe_static_path(rel)
+        if path is None:
+            return Response("not found", status_code=404, media_type="text/plain",
+                            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+        loaded = _load_static(path)
+        if loaded is None:
+            return Response("not found", status_code=404, media_type="text/plain", headers={"Cache-Control": "no-store"})
+        body, etag = loaded
+        headers = {
+            "Cache-Control": "public, max-age=3600",
+            "ETag": etag,
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": CSP,
+        }
+        if _etag_matches(request.headers.get("if-none-match"), etag):
+            return Response(status_code=304, headers=headers)
+        media = STATIC_TYPES[path.suffix.lower()]
+        if request.method == "HEAD":
+            return Response(status_code=200, media_type=media, headers={**headers, "Content-Length": str(len(body))})
+        return Response(body, media_type=media, headers=headers)
+
+    return [
+        Route("/admin", shell, methods=["GET", "HEAD"]),
+        Route("/admin/", shell, methods=["GET", "HEAD"]),
+        Route("/admin/static/{path:path}", static, methods=["GET", "HEAD"]),
+        _ShellRoute("/admin/{path:path}", shell, methods=["GET", "HEAD"]),
+    ]
+
+
+__all__ = ["routes", "render_dashboard", "render_login", "CSP", "STATIC_DIR"]

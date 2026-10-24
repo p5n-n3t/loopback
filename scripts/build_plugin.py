@@ -4,16 +4,22 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "runtime"))
+from version import VERSION  # noqa: E402
+
+SKILLS_DIR = ROOT / "skills"
 
 PLUGIN_JSON = {
     "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
     "name": "loopback",
-    "version": "3.0.0",
+    "version": VERSION,
     "description": "Operate authorized computers and servers through a self-hosted MCP control plane.",
     "author": {
         "name": "Loopback",
@@ -47,53 +53,10 @@ PLUGIN_JSON = {
                     "Use Loopback to inspect my registered nodes and compare their state."
                 ]
             },
-            "onboardingSkill": "./skills/loopback/SKILL.md"
+            "onboardingSkill": "./skills/loopback-core/SKILL.md"
         }
     }
 }
-
-SKILL = """---
-name: loopback
-description: Operate an authorized computer or server through the Loopback MCP server. Use for filesystem, Git, shell, process, background-job, persistent-terminal, diagnostics, document, optional browser, policy, and registered-node tasks.
----
-
-# Loopback
-
-Use the Loopback MCP tools when the user asks to inspect or operate the machine(s)
-connected through Loopback.
-
-## Safety and intent
-
-- Respect Loopback policy errors and approval requirements.
-- Do not try to bypass a denied path, blocked command, client confirmation, or
-  Loopback approval gate.
-- Prefer read-only tools for inspection.
-- Use one-shot execution for short commands, background jobs for long-running
-  non-interactive work, and persistent terminals when state or interaction must
-  survive across multiple calls.
-- Treat process signaling and shell execution as side-effecting.
-- Use structured document tools instead of shelling out when they fit the file.
-- Use browser automation only when the capability is enabled and the task requires web interaction.
-- Use native desktop tools only when enabled and the user explicitly needs interaction with local GUI applications.
-- Never expose credentials, tokens, private keys, recovery codes, or unrelated
-  secrets in user-visible output.
-
-## Efficient workflows
-
-For local work, call the local tool directly.
-
-For fleet work:
-1. call node_list;
-2. choose the named node the user intended;
-3. use node_call only for that node and tool.
-
-Use job_output offsets rather than repeatedly returning the entire log.
-
-Use terminal_read after terminal_write and avoid tight polling loops.
-
-When a command is blocked with approval_required, explain the requested action
-and let the user approve it through Loopback rather than attempting a workaround.
-"""
 
 
 def validate_url(value: str) -> str:
@@ -127,12 +90,20 @@ def main() -> int:
         }
     }
 
+    if not SKILLS_DIR.is_dir():
+        print(f"skills directory not found: {SKILLS_DIR}", file=sys.stderr)
+        return 1
+
     with tempfile.TemporaryDirectory(prefix="loopback-plugin-") as td:
         root = Path(td) / "loopback"
-        (root / "skills" / "loopback").mkdir(parents=True)
+        root.mkdir(parents=True)
         (root / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         (root / "mcp.json").write_text(json.dumps(mcp, indent=2) + "\n", encoding="utf-8")
-        (root / "skills" / "loopback" / "SKILL.md").write_text(SKILL, encoding="utf-8")
+        shutil.copytree(SKILLS_DIR, root / "skills")
+        # Backwards-compatible alias: v3 plugin consumers looked for skills/loopback/SKILL.md.
+        legacy = root / "skills" / "loopback"
+        legacy.mkdir(exist_ok=True)
+        shutil.copy2(SKILLS_DIR / "loopback-core" / "SKILL.md", legacy / "SKILL.md")
 
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(root.rglob("*")):

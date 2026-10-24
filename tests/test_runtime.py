@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import os
 import sys
 import tempfile
 import time
@@ -31,7 +29,8 @@ class PolicyTests(unittest.TestCase):
         self.allowed.mkdir()
         self.denied = self.home / "secret"
         self.denied.mkdir()
-        self.policy = PolicyStore(self.cfg)
+        self.policy = PolicyStore(self.cfg, home=str(self.home))
+        self.policy.sandbox_active = True  # restricted profiles require OS enforcement for shell access
         self.policy.save({
             "profile": "standard",
             "allowed_roots": [str(self.home)],

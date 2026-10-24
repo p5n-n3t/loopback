@@ -1,0 +1,28 @@
+[
+  {
+    "name": "build-server",
+    "host": "build.internal.example.com",
+    "port": 22,
+    "user": "alice",
+    "identity_file": "~/.ssh/id_ed25519_loopback",
+    "display_name": "CI build server",
+    "kind": "remote-vm",
+    "group": "infra",
+    "via": "tailscale",
+    "created_at": 1759000000.0,
+    "updated_at": 1759000000.0
+  },
+  {
+    "name": "nas",
+    "host": "192.168.1.50",
+    "port": 22,
+    "user": "alice",
+    "identity_file": null,
+    "display_name": "Home NAS",
+    "kind": "remote-physical",
+    "group": "home",
+    "via": "lan",
+    "created_at": 1759000000.0,
+    "updated_at": 1759000000.0
+  }
+]
