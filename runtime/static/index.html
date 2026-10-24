@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<meta name="color-scheme" content="dark light">
+<meta name="color-scheme" content="light dark">
 <title>Loopback · Control plane</title>
 <link rel="stylesheet" href="/admin/static/app.css">
 <script src="/admin/static/topology.js" defer></script>
@@ -14,7 +14,7 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="top">
   <button class="icon-btn hamburger" id="navToggle" type="button" aria-label="Toggle navigation" aria-controls="nav" aria-expanded="false"><span></span><span></span><span></span></button>
-  <a class="brand" href="#/" aria-label="Loopback overview"><span class="logo" aria-hidden="true"></span>LOOPBACK <small>CONTROL PLANE</small></a>
+  <span class="breadcrumb"><span class="breadcrumb-icon" aria-hidden="true">▤</span> <span id="routeTitle">Overview</span></span>
   <span class="host" title="Public host">{{HOST}}</span>
   <span class="spacer"></span>
   <span class="host" id="lastUpdated" aria-live="polite"></span>
@@ -23,10 +23,13 @@
 </header>
 <div class="layout">
   <nav id="nav" class="nav" aria-label="Sections">
-    <div class="nav-group">Operate</div>
+    <a class="workspace-brand" href="#/" aria-label="Loopback overview"><img class="brand-symbol" src="https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-24/gMgngAwQrK5X_IaDYPqc9.png" alt="Loopback"><span><b>Personal workspace</b><small>{{HOST}}</small></span></a>
+    <label class="nav-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Find a section" aria-label="Find a section" data-input="nav-search"></label>
+    <div class="nav-group">Workspace</div>
     <a href="#/" data-route="">Overview</a>
     <a href="#/topology" data-route="topology">Topology</a>
     <a href="#/local" data-route="local">Local machine</a>
+    <a href="#/services" data-route="services">Services &amp; tunnels</a>
     <a href="#/fleet" data-route="fleet" title="Loopback Nodes and SSH targets">Fleet</a>
     <div class="nav-group">Access</div>
     <a href="#/filesystem" data-route="filesystem">Filesystem</a>

@@ -31,7 +31,7 @@ from starlette.routing import Match, Route
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
+CSP = ("default-src 'self'; img-src 'self' data: https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com; style-src 'self'; script-src 'self'; "
        "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
 
 SHELL_HEADERS = {

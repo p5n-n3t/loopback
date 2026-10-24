@@ -6,8 +6,8 @@
  */
 'use strict';
 (function () {
-const LAYER = { 'external-client': 0, tunnel: 1, network: 1, gateway: 2 };
-const LAYER_NAME = ['Clients', 'Ingress', 'Gateway', 'Machines'];
+const LAYER = { 'external-client': 0, tunnel: 1, network: 1, gateway: 2, 'mcp-service': 4 };
+const LAYER_NAME = ['Clients', 'Ingress', 'Gateway', 'Machines', 'Services'];
 const NW = 188, NH = 66, GW = 220, GH = 78, HG = 34, VG = 118, GROUP_GAP = 64, LM = 96, TM = 30;
 const TRANSPORT = { ssh: 'SSH', https: 'HTTPS', http: 'HTTP', mcp: 'MCP', 'cloudflare-tunnel': 'Cloudflare Tunnel', tailscale: 'Tailscale', 'tailscale-serve': 'Tailscale', 'tailscale-funnel': 'Tailscale Funnel' };
 const BAD = new Set(['unreachable', 'auth_failed', 'error']);
@@ -35,7 +35,7 @@ function nodeStatus(n, data) {
 /* -- layout */
 function layout(data) {
   const nodes = data.nodes.map(n => ({ ...n, layer: LAYER[n.type] ?? 3 }));
-  const rows = [[], [], [], []];
+  const rows = [[], [], [], [], []];
   nodes.forEach(n => rows[n.layer].push(n));
   rows.forEach((r, i) => { if (i < 3) r.sort((a, b) => String(a.label).localeCompare(String(b.label))); });
   const groups = new Map();
@@ -45,12 +45,12 @@ function layout(data) {
   const size = n => n.type === 'gateway' ? [GW, GH] : [NW, NH];
   const rowW = r => r.reduce((s, n) => s + size(n)[0], 0) + Math.max(0, r.length - 1) * HG;
   const w3 = gnames.reduce((s, g) => s + rowW(groups.get(g)), 0) + Math.max(0, gnames.length - 1) * GROUP_GAP;
-  const maxW = Math.max(rowW(rows[0]), rowW(rows[1]), rowW(rows[2]), w3, NW);
-  const used = [0, 1, 2, 3].filter(i => rows[i].length);
+  const maxW = Math.max(rowW(rows[0]), rowW(rows[1]), rowW(rows[2]), w3, rowW(rows[4]), NW);
+  const used = [0, 1, 2, 3, 4].filter(i => rows[i].length);
   const rowY = {}; let y = TM;
   used.forEach(i => { if (i === 3 && gnames.length) y += 26; rowY[i] = y; y += GH + VG; });
   const place = (list, x0, ly) => { let x = x0; list.forEach(n => { const [w, h] = size(n); n.w = w; n.h = h; n.x = x; n.y = ly + (GH - h) / 2; x += w + HG; }); };
-  [0, 1, 2].forEach(i => { if (rows[i].length) place(rows[i], LM + (maxW - rowW(rows[i])) / 2, rowY[i]); });
+  [0, 1, 2, 4].forEach(i => { if (rows[i].length) place(rows[i], LM + (maxW - rowW(rows[i])) / 2, rowY[i]); });
   const brackets = [];
   if (rows[3].length) {
     let x = LM + (maxW - w3) / 2;
@@ -114,7 +114,9 @@ function icon(n) {
 function nodeSvg(n) {
   const H = LB.H, d = n.detail || {};
   const sub = [n.kind || d.machine_kind, d.os].filter(Boolean).join(' · ') || n.type;
-  const l2 = n.display_name ? n.display_name : sub, l3 = n.display_name ? sub : '';
+  const m = d.worker_metrics;
+  const summary = m ? 'CPU ' + (m.cpu_percent == null ? '—' : m.cpu_percent + '%') + ' · RAM ' + (m.memory_percent == null ? '—' : m.memory_percent + '%') : '';
+  const l2 = summary || (n.type === 'mcp-service' ? d.target + ' · ' + d.transport : n.display_name ? n.display_name : sub), l3 = summary ? '↓ ' + LB.bytes(m.rx_per_second) + '/s ↑ ' + LB.bytes(m.tx_per_second) + '/s' : n.display_name ? sub : '';
   const ty = l3 ? [22, 38, 53] : [28, 45];
   const dim = T.filter !== 'all' && n.status !== T.filter ? ' dim' : '';
   return H`<g class="tn ${n.type} st-${n.status}${T.sel === 'n:' + n.id ? ' sel' : ''}${dim}" transform="translate(${n.x},${n.y})" data-nid="${n.id}" tabindex="0" role="button"

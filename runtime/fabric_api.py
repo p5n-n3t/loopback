@@ -263,6 +263,8 @@ def routes(ctx: Any) -> list[Route]:
     @_handler
     async def topology_get(request: Request) -> JSONResponse:
         topo = _require(getattr(ctx, "topology", None), "topology")
+        if getattr(ctx, "workers", None):
+            await asyncio.to_thread(ctx.workers.snapshot)
         return JSONResponse(await asyncio.to_thread(topo.build))
 
     @_handler
@@ -352,7 +354,41 @@ def routes(ctx: Any) -> list[Route]:
             raise _HTTPError(404, f"unknown ingress: {name}")
         return JSONResponse(await asyncio.to_thread(ing.diagnostics, name))
 
+    # Worker control is dashboard-only: it never becomes an MCP tool or accepts
+    # bearer credentials at the administration boundary.
+    @_handler
+    async def workers_get(request: Request) -> JSONResponse:
+        manager = _require(getattr(ctx, "workers", None), "workers")
+        return JSONResponse(await asyncio.to_thread(manager.snapshot))
+
+    @_handler
+    async def workers_install(request: Request) -> JSONResponse:
+        manager = _require(getattr(ctx, "workers", None), "workers")
+        target = request.path_params["target"]
+        result = await asyncio.to_thread(manager.install, target)
+        _audit(ctx, "worker.install", target)
+        return JSONResponse(result)
+
+    @_handler
+    async def bindings_save(request: Request) -> JSONResponse:
+        manager = _require(getattr(ctx, "workers", None), "workers")
+        result = await asyncio.to_thread(manager.save, await _body(request))
+        _audit(ctx, "binding.save", result["name"])
+        return JSONResponse(result, status_code=201)
+
+    @_handler
+    async def bindings_action(request: Request) -> JSONResponse:
+        manager = _require(getattr(ctx, "workers", None), "workers")
+        name, action = request.path_params["name"], request.path_params["action"]
+        result = await asyncio.to_thread(manager.action, name, action)
+        _audit(ctx, "binding." + action, name)
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
     return [
+        Route("/api/admin/workers", workers_get, methods=["GET"]),
+        Route("/api/admin/workers/{target}/install", workers_install, methods=["POST"]),
+        Route("/api/admin/bindings", bindings_save, methods=["POST"]),
+        Route("/api/admin/bindings/{name}/{action}", bindings_action, methods=["POST"]),
         Route("/api/admin/nodes", nodes_list, methods=["GET"]),
         Route("/api/admin/nodes", nodes_upsert, methods=["POST"]),
         Route("/api/admin/nodes/{name}", nodes_delete, methods=["DELETE"]),

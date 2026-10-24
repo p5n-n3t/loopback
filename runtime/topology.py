@@ -565,6 +565,38 @@ class TopologyBuilder:
                           **self._status(stored or None, disabled=not bool(n.get("enabled", True))),
                           "detail": {"via": via}})
 
+        # Workers report process health and payload counters separately from SSH control.
+        manager = getattr(ctx, "workers", None)
+        snapshot = getattr(manager, "cache", None) or {}
+        workers = {w["target"]: w for w in snapshot.get("workers", [])}
+        for node in nodes:
+            target = "local" if node["id"] == "gateway" else node["id"].removeprefix("ssh:")
+            if target in workers:
+                worker = workers[target]
+                node["detail"]["worker_metrics"] = worker.get("worker")
+                node["detail"]["host_metrics"] = worker.get("host")
+                node["detail"]["heartbeat_at"] = worker.get("heartbeat_at")
+        for binding in manager.bindings() if manager else []:
+            target = binding["target"]
+            worker = workers.get(target, {})
+            runtime = next((x for x in worker.get("bindings", []) if x["name"] == binding["name"]), {})
+            nid = "service:" + binding["name"]
+            exposure = {"private": "local", "tailscale-serve": "tailnet", "tailscale-funnel": "public", "cloudflare": "public"}[binding["exposure"]]
+            nodes.append({"id": nid, "type": "mcp-service", "kind": "unknown", "label": binding["name"], "group": target,
+                          "status": "healthy" if runtime.get("running") else "disconnected" if worker.get("status") == "healthy" else "unreachable",
+                          "detail": {"target": target, "transport": binding["transport"], "exposure": exposure,
+                                     "port": binding["port"], "url": runtime.get("url") or binding.get("url"),
+                                     "note": "Status measures the worker process, not public endpoint reachability"}})
+            edges.append({"id": "host->" + nid, "from": "gateway" if target == "local" else "ssh:" + target,
+                          "to": nid, "transport": binding["transport"], "protocol": "mcp", "exposure": "local",
+                          "status": "healthy" if runtime.get("running") else "untested", "direct": True, "proxied": False,
+                          "detail": {"note": "Service runs here; this edge is hosting, not SSH data forwarding"}})
+            if exposure != "local":
+                edges.append({"id": "clients->" + nid, "from": "clients", "to": nid,
+                              "transport": binding["exposure"], "protocol": "mcp", "exposure": exposure,
+                              "status": "untested", "direct": True, "proxied": False,
+                              "detail": {"note": "Direct to worker; public reachability has not been probed"}})
+
         return {
             "generated_at": time.time(),
             "stale_after_seconds": self.stale_after_seconds,
