@@ -5,6 +5,32 @@ Working branch: `ls/1-so-i-am-starting-this-prompt-task-with-t-_EO8`.
 
 ## Latest state (2026-10-24, after owner applied updater)
 
+### Startup regression follow-up
+
+PR #5 is now merged into main (3b9f03b); the owner authorized follow-up PRs. Its
+earlier delivery blockers below are historical. The desktop connector currently
+returns Cloudflare HTTP 530 / error 1033, so no new live desktop checks are possible.
+
+The next fix makes `loopback up` and `restart` explicitly reconcile configured
+Cloudflare ingress even when the gateway is already running. Connector launch
+failure returns nonzero, and upgrades check this gate too. An existing external
+YAML can be imported once with `loopback up --cloudflare-config PATH --host HOST`;
+subsequent starts need only `loopback up`. Linux reuses a same-user connector whose
+exact saved config/token path matches, leaving other connectors alone. Existing
+YAML, credentials, DNS and Tailscale routes are not rewritten.
+
+The owner's existing connector config is
+`/home/jq/.config/ai-bridge/cloudflared.yml`, hostname `loopback.ziopsyop.tech`.
+After this fix is installed, import that file once. To update while an old tunnel
+definition is incomplete, use the existing local source updater with
+`upgrade --source . --yes --no-restart`, then the import command above. Runtime
+updates must be run by the owner locally; do not weaken the MCP sandbox to do it.
+
+Validation: 123 tests pass, including eight startup regressions with real detached
+connector processes, recovery while the server is up, exact-config process reuse,
+import persistence, migration and upgrade failure gating. The connector fixture
+does not connect to Cloudflare; actual edge recovery remains pending owner action.
+
 - Source branch is pushed; no new PR opened. PR #4 was already merged before this continuation, so these continuation commits are not on main.
 - Desktop runs v4.0.0 from `729b791`, successfully upgraded from v2.1.0 with backup and automatic rollback available. Owner ran the follow-up updater. Local checkout with saved changes is preserved.
 - All seven eligible workers are installed and report actual CPU/RAM: ora1, ora3, ora5, ora6, ora7, aws1, aws2. Targets use their existing SSH aliases with `use_ssh_config: true`. Ora2 and ora4 are untouched.

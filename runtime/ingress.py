@@ -513,7 +513,42 @@ class IngressManager:
             pid = self._read_pid()
             if pid and _pid_alive(pid) and _pid_is_cloudflared(pid):
                 return pid
+            # Recover a legacy or manually started connector only when its saved
+            # config/token-file argument matches this instance exactly.
+            if self._cfg("cloudflare").get("enabled"):
+                pid = self._matching_cloudflared_pid()
+                if pid:
+                    _atomic_write(self.pid_path, f"{pid}\n")
+                    return pid
             return None
+
+    def _matching_cloudflared_pid(self) -> int | None:
+        if not sys.platform.startswith("linux"):
+            return None
+        cfg = self._cfg("cloudflare")
+        flag = "--token-file" if cfg.get("token_file") else "--config"
+        path = cfg.get("token_file") or cfg.get("config_file") or self.yml_path
+        expected = self._expand(path).resolve()
+        for entry in Path('/proc').iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                if entry.stat().st_uid != os.getuid():
+                    continue
+                argv = (entry / 'cmdline').read_bytes().decode().rstrip('\0').split('\0')
+                if not argv or Path(argv[0]).name != 'cloudflared' or 'tunnel' not in argv or 'run' not in argv:
+                    continue
+                if cfg.get('tunnel_id') and (argv[argv.index('run') + 1:] or [None])[0] != str(cfg['tunnel_id']):
+                    continue
+                value = next((arg.split('=', 1)[1] for arg in argv if arg.startswith(flag + '=')), None)
+                if value is None and flag in argv:
+                    value = argv[argv.index(flag) + 1]
+                # Relative arguments depend on the connector's own working directory.
+                if value and Path(value).is_absolute() and Path(value).resolve() == expected:
+                    return int(entry.name)
+            except (OSError, ValueError, IndexError, UnicodeError):
+                continue
+        return None
 
     def _rotate_log(self) -> None:
         try:
@@ -532,10 +567,10 @@ class IngressManager:
                 raise IngressError(f"token_file is missing or unreadable: {tf}")
             return [binary, "tunnel", "--no-autoupdate", "run", "--token-file", str(tf)]
         tid = cfg.get("tunnel_id")
-        conf = Path(cfg.get("config_file") or self.yml_path)
-        if not tid or not conf.is_file():
-            raise IngressError("cloudflare needs token_file or tunnel_id with a generated cloudflared.yml")
-        return [binary, "tunnel", "--no-autoupdate", "--config", str(conf), "run", str(tid)]
+        conf = self._expand(cfg["config_file"]) if cfg.get("config_file") else self.yml_path
+        if not conf.is_file() or not os.access(conf, os.R_OK) or not (tid or cfg.get("config_file")):
+            raise IngressError("Cloudflare needs a readable config_file, or token_file, or tunnel_id with cloudflared.yml")
+        return [binary, "tunnel", "--no-autoupdate", "--config", str(conf), "run", *([str(tid)] if tid else [])]
 
     def start_cloudflare(self) -> dict[str, Any]:
         """Start the detached cloudflared process if it is not running."""
@@ -886,14 +921,21 @@ class IngressManager:
                        "fix": None if installed else "Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"})
         tid = str(cfg.get("tunnel_id") or "")
         cert = (self.home / ".cloudflared" / "cert.pem").is_file()
-        checks.append({"name": "Cloudflare login (cert.pem)", "ok": cert or bool(cfg.get("token_file")),
-                       "detail": "origin certificate present" if cert else ("not needed with token_file" if cfg.get("token_file") else "~/.cloudflared/cert.pem missing"),
-                       "fix": None if cert or cfg.get("token_file") else "Run: cloudflared tunnel login"})
+        # Running an existing tunnel needs its credentials, not an origin certificate.
+        checks.append({"name": "Cloudflare login (cert.pem)", "ok": True,
+                       "detail": "origin certificate present" if cert else "not needed to run an existing tunnel",
+                       "fix": None})
         if cfg.get("token_file"):
             tf = self._expand(cfg["token_file"])
             ok = tf.is_file() and os.access(tf, os.R_OK)
             checks.append({"name": "Tunnel token file", "ok": ok, "detail": "present and readable" if ok else "missing or unreadable",
                            "fix": None if ok else "Save the tunnel token to a file (mode 0600) and set token_file"})
+        elif cfg.get("config_file"):
+            conf = self._expand(cfg["config_file"])
+            ok = conf.is_file() and os.access(conf, os.R_OK)
+            checks.append({"name": "Tunnel config", "ok": ok,
+                           "detail": "existing config readable; cloudflared validates its credentials at startup" if ok else "missing or unreadable",
+                           "fix": None if ok else "Restore the saved config file or import another with loopback up --cloudflare-config PATH --host HOST"})
         elif tid:
             creds = (self.home / ".cloudflared" / f"{tid}.json").is_file()
             checks.append({"name": "Tunnel credentials", "ok": creds,
