@@ -51,6 +51,24 @@ upgrade before reaching for rollback.
 
 ## Verifying after an upgrade
 
+`loopback up` starts the gateway **and its configured Cloudflare connector**.
+Running it again repairs a stopped connector even if the gateway is already up.
+It exits with an error if the connector cannot start; local server health alone
+does not count as success. `loopback restart` performs the same ingress check.
+
+If an older installation ran Cloudflare from a separate YAML file, import that
+existing configuration once (use your actual saved path and hostname):
+
+```bash
+loopback up --cloudflare-config "$HOME/.config/old-bridge/cloudflared.yml" --host mcp.example.com
+```
+
+This saves the path without rewriting the YAML, tunnel, DNS, credentials or
+Tailscale routes. Subsequent starts use only `loopback up`. On Linux, an existing
+connector using that exact config is reused instead of starting a duplicate.
+Stop Loopback before importing a different active tunnel. Inspect startup errors
+with `loopback logs --file cloudflared`.
+
 ```bash
 loopback doctor --deep
 loopback version --json

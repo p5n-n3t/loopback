@@ -145,6 +145,7 @@ def migrate_legacy_env(env: dict[str, str], base: dict[str, Any]) -> dict[str, A
             "hostname": host,
             "tunnel_id": env.get("LOOPBACK_CLOUDFLARE_TUNNEL_ID") or None,
             "token_file": env.get("LOOPBACK_CLOUDFLARE_TOKEN_FILE") or None,
+            "config_file": env.get("LOOPBACK_CLOUDFLARE_CONFIG_FILE") or None,
         })
     elif ingress == "tailscale":
         # v3 only knew Funnel (public). Preserve that behaviour explicitly.
@@ -193,8 +194,10 @@ def validate(cfg: dict[str, Any]) -> list[str]:
     if cf.get("enabled"):
         if not cf.get("hostname") or not HOSTNAME_RE.match(str(cf["hostname"])) or "." not in str(cf["hostname"]):
             errors.append("cloudflare.hostname must be a fully-qualified hostname when Cloudflare is enabled")
-        if not cf.get("tunnel_id") and not cf.get("token_file"):
-            errors.append("cloudflare requires tunnel_id (named tunnel) or token_file")
+        if not cf.get("tunnel_id") and not cf.get("token_file") and not cf.get("config_file"):
+            errors.append("cloudflare requires tunnel_id, token_file or config_file")
+        if cf.get("config_file") is not None and (not isinstance(cf["config_file"], str) or not cf["config_file"].strip()):
+            errors.append("cloudflare.config_file must be a non-empty path")
         if cf.get("access_policy") not in {"oauth", "cloudflare-access", "both"}:
             errors.append("cloudflare.access_policy must be oauth, cloudflare-access or both")
     ts = ingress.get("tailscale") or {}
@@ -373,6 +376,7 @@ class ConfigStore:
             f"LOOPBACK_INGRESS={ingress}",
             f"LOOPBACK_CLOUDFLARE_TUNNEL_ID={ing['cloudflare'].get('tunnel_id') or ''}",
             f"LOOPBACK_CLOUDFLARE_TOKEN_FILE={ing['cloudflare'].get('token_file') or ''}",
+            f"LOOPBACK_CLOUDFLARE_CONFIG_FILE={ing['cloudflare'].get('config_file') or ''}",
             f"LOOPBACK_TAILSCALE_HTTPS_PORT={ing['tailscale'].get('https_port') or 443}",
             f"LOOPBACK_TAILSCALE_MODE={ing['tailscale'].get('mode') or 'serve'}",
         ]

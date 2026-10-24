@@ -1383,6 +1383,9 @@ def post_upgrade_checks(cfg: Path, new_version: str, report: Report, timeout: fl
     status, _, _ = http(f"http://127.0.0.1:{port}/admin/login", timeout=5)
     if not report.step("dashboard login page", status == 200, f"HTTP {status}"):
         failures.append(f"/admin/login returned {status}")
+    ingress = helper_json(cfg, "start-ingress", timeout=30)
+    if not report.step("configured ingress", ingress.get("ok"), ingress.get("error") or "started or already running"):
+        failures.append("configured ingress failed to start")
     res = helper_json(cfg, "verify-mcp", "--port", str(port))
     if not report.step("MCP initialize", res.get("ok"), res.get("detail") or res.get("error") or "ok"):
         failures.append("MCP initialize failed")
@@ -1790,8 +1793,19 @@ def require_installed(cfg: Path) -> None:
 def cmd_up(args: argparse.Namespace) -> int:
     cfg = cfg_dir()
     require_installed(cfg)
+    imported = False
+    if getattr(args, "cloudflare_config", None):
+        result = helper_json(cfg, "import-cloudflare", "--config-file", args.cloudflare_config,
+                             "--host", getattr(args, "host", None) or "")
+        if not result.get("ok"):
+            say(f"{FAIL_MARK} tunnel configuration not saved: {redact(str(result.get('error')))}", err=True)
+            return 1
+        imported = True
+    elif getattr(args, "host", None):
+        say(f"{FAIL_MARK} --host requires --cloudflare-config", err=True)
+        return 2
     svc = service_manager(cfg)
-    res = svc.start()
+    res = svc.restart() if imported else svc.start()
     if not res.get("ok"):
         say(f"{FAIL_MARK} start failed: {res.get('detail')}", err=True)
         return 1
@@ -1802,6 +1816,8 @@ def cmd_up(args: argparse.Namespace) -> int:
             say(redact(tail_text(log.read_text(encoding="utf-8", errors="replace"), 40)), err=True)
         say(f"{FAIL_MARK} server failed to start (see loopback logs)", err=True)
         return 1
+    if not ensure_cli_ingress(cfg):
+        return 1
     u = urls(cfg)
     say(f"{OK_MARK} Loopback is up ({res.get('manager')}, v{health.get('version')})")
     say(f"  local:  {u['local']}")
@@ -1809,6 +1825,19 @@ def cmd_up(args: argparse.Namespace) -> int:
     for p in u["public"]:
         say(f"  public: {p}")
     return 0
+
+
+def ensure_cli_ingress(cfg: Path) -> bool:
+    """Reconcile the saved tunnel even when the gateway was already running."""
+    result = helper_json(cfg, "start-ingress", timeout=30)
+    if not result.get("ok"):
+        error = redact(str(result.get("error") or "tunnel startup failed"))
+        say(f"{FAIL_MARK} local server is running, but configured ingress failed: {error}", err=True)
+        say("  See: loopback logs --file cloudflared", err=True)
+        return False
+    if result.get("pid"):
+        say(f"{OK_MARK} Cloudflare connector running (pid {result['pid']})")
+    return True
 
 
 def cmd_down(args: argparse.Namespace) -> int:
@@ -1834,9 +1863,11 @@ def cmd_restart(args: argparse.Namespace) -> int:
     svc = service_manager(cfg)
     res = svc.restart()
     health = wait_health(svc.port, 40) if res.get("ok") else None
-    if health:
+    if health and ensure_cli_ingress(cfg):
         say(f"{OK_MARK} restarted (v{health.get('version')})")
         return 0
+    if health:
+        return 1
     say(f"{FAIL_MARK} restart failed: {res.get('detail') or 'no health response'} (see loopback logs)", err=True)
     return 1
 
@@ -2388,6 +2419,26 @@ def cmd_helper(args: argparse.Namespace) -> int:
             out = {"ok": True, "legacy_machine_token_mcp": ctx.legacy_mcp_token_enabled(),
                    "profile": ctx.policy.profile, "migrated": bool(cfg_data.get("_migrated_from")),
                    "detail": f"schema {cfg_data.get('schema_version')}, profile {ctx.policy.profile}"}
+        elif args.helper_cmd == "import-cloudflare":
+            path = Path(args.config_file).expanduser().resolve()
+            if not path.is_file() or not os.access(path, os.R_OK):
+                raise ValueError("Cloudflare config file is missing or unreadable")
+            host = args.host or ctx.config.primary_host()
+            if host in ("localhost", "127.0.0.1"):
+                raise ValueError("Provide the existing public hostname with --host HOST")
+            current = ctx.config.data["ingress"]["cloudflare"]
+            if ctx.ingress is None:
+                raise ValueError("Ingress module is not installed")
+            if ctx.ingress.cloudflared_pid() and (not current.get("config_file") or
+                    Path(current["config_file"]).expanduser().resolve() != path):
+                raise ValueError("Run loopback down before importing a different tunnel config")
+            ctx.config.save({"ingress": {"cloudflare": {"enabled": True, "hostname": host,
+                                   "config_file": str(path), "tunnel_id": None, "token_file": None}}}, actor="cli")
+            out = {"ok": True}
+        elif args.helper_cmd == "start-ingress":
+            from service import start_ingress
+
+            out = start_ingress(ctx)
         elif args.helper_cmd == "verify-mcp":
             res = verify_mcp(ctx.auth, int(args.port or ctx.config.port), exec_command=args.exec)
             res["public_hosts"] = ctx.config.public_hosts()
@@ -2458,8 +2509,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--deep", action="store_true")
     sp.add_argument("--json", action="store_true")
 
-    add("up", cmd_up, "start the gateway")
-    add("start", cmd_up, "alias of up")
+    for name, help_text in (("up", "start the gateway and its configured tunnel"), ("start", "alias of up")):
+        sp = add(name, cmd_up, help_text)
+        sp.add_argument("--cloudflare-config", metavar="PATH", help="remember and run an existing Cloudflare YAML config")
+        sp.add_argument("--host", metavar="HOST", help="existing public hostname when importing a Cloudflare config")
     add("down", cmd_down, "stop the gateway")
     add("stop", cmd_down, "alias of down")
     add("restart", cmd_restart, "restart the gateway")
@@ -2552,6 +2605,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("_helper", cmd_helper, argparse.SUPPRESS)
     hsub = sp.add_subparsers(dest="helper_cmd", required=True)
     hsub.add_parser("migrate")
+    hsub.add_parser("start-ingress")
+    hp = hsub.add_parser("import-cloudflare")
+    hp.add_argument("--config-file", required=True)
+    hp.add_argument("--host", default="")
     h = hsub.add_parser("verify-mcp")
     h.add_argument("--port", type=int)
     h.add_argument("--exec")
