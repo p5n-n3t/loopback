@@ -280,7 +280,7 @@ async function mount(v, lb) {
   T.svg = document.getElementById('topoSvg');
   bindPanZoom(T.svg);
   await load(false);
-  v.poll(30000, q => v.alive() ? load(q) : null);
+  v.poll(5000, q => v.alive() ? load(q) : null);
 }
 
 let registered = false;

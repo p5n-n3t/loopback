@@ -468,6 +468,7 @@ views.fleet = async v => {
     ${card('SSH targets', table(['', 'Name', 'Address', 'Kind', 'Group', ['', 'act']], S.map(s => H`<tr><td>${dot((s.last_probe || {}).status || 'untested')}</td><td><b>${s.name}</b>${s.display_name ? H`<div class="small muted">${s.display_name}</div>` : ''}</td><td><code>${s.user ? s.user + '@' : ''}${s.host}${s.port && s.port !== 22 ? ':' + s.port : ''}</code></td><td>${s.kind || ''}</td><td>${s.group || ''}</td>
         <td class="act"><button class="sm" data-act="probe" data-kind="ssh" data-name="${s.name}">Probe</button> <a class="btn sm" href="#/ssh?edit=${enc(s.name)}">Edit</a> <a class="btn sm" href="#/filesystem?target=${enc(s.name)}">Permissions</a></td></tr>`), 'No SSH targets. Add one under SSH config.'), { cls: 'c6', actions: H`<a class="btn sm primary" href="#/ssh">Add SSH target</a>` })}
     </div>`);
+  v.poll(5000, async () => { const data = await get('/api/admin/workers'); if (v.alive()) $('#fleet-health').innerHTML = String(workerCards(data.workers || [])); stamp(); });
 };
 A['install-worker'] = async t => {
   if (!await confirmDo('Install worker on ' + t.dataset.target + '?', H`<p>Copy the Loopback worker and install its Python dependencies under the SSH account’s home. Existing services and tunnels stay in place.</p>`, 'Install worker', false)) return;
@@ -838,7 +839,7 @@ views.ssh = async v => {
         <td>${p.status ? H`${st(p.status)}<div class="small muted">${p.latency_ms != null ? p.latency_ms + ' ms · ' : ''}${rel(p.checked_at)}${(p.remote || {}).os ? ' · ' + p.remote.os : ''}</div>${p.error ? H`<div class="small">${p.error}</div>` : ''}` : st('untested')}</td>
         <td class="act"><button class="sm" data-act="probe" data-kind="ssh" data-name="${s.name}">Probe</button> <a class="btn sm" href="#/ssh?edit=${enc(s.name)}">Edit</a> <a class="btn sm" href="#/filesystem?target=${enc(s.name)}">Permissions</a> <button class="sm danger" data-act="remove-machine" data-kind="ssh" data-name="${s.name}">Remove</button></td></tr>`;
     }), 'No SSH targets yet.'), 'c12')}
-    ${card(edit ? 'Edit ' + edit : 'Add SSH target', H`<form data-form="ssh">${errBox}<div class="fields">
+    ${card(edit ? 'Edit ' + edit : 'Add SSH target', H`<form data-form="ssh">${errBox}<label class="check"><input type="checkbox" name="use_ssh_config"${chk(e.use_ssh_config)}> Use SSH alias settings (host, port and user from this machine’s SSH config)</label><div class="fields">
       ${fld('Name', 'f_name', inp('name', e.name, { req: true, ph: 'db-1', extra: edit ? 'readonly' : 'pattern="[A-Za-z0-9._-]+"' }))}
       ${fld('Host', 'f_host', inp('host', e.host, { req: true, ph: 'db-1.tailnet.ts.net' }))}
       ${fld('Port', 'f_port', inp('port', e.port || 22, { type: 'number', extra: 'min="1" max="65535"' }))}
@@ -851,7 +852,7 @@ views.ssh = async v => {
       <div class="row end">${edit ? H`<a class="btn" href="#/ssh">Cancel</a>` : ''}<button type="submit" class="primary">${edit ? 'Save target' : 'Add target'}</button></div></form>`, 'c12')}</div>`);
 };
 F.ssh = async (f, o) => {
-  await post('/api/admin/ssh', { name: o.name, host: o.host, port: o.port || 22, user: o.user || null, identity_file: o.identity_file || null, display_name: o.display_name || null, kind: o.kind, group: o.group || null, via: o.via });
+  await post('/api/admin/ssh', { name: o.name, host: o.host, port: o.port || 22, user: o.user || null, identity_file: o.identity_file || null, display_name: o.display_name || null, kind: o.kind, group: o.group || null, via: o.via, use_ssh_config: o.use_ssh_config });
   toast('SSH target saved', 'ok'); if (parseHash().params.get('edit')) location.hash = '#/ssh'; else refresh();
 };
 

@@ -30,3 +30,21 @@ Access: desktop `/home/jq/loopback` is clean on local `main` at `5fcf275` (local
 `/proof` loaded and routed to visual + logic proof. Loopback runs in this sandbox on port 3030 (`/tmp/loopback-preview`, process via exec session). Stack only declares `dev:5173` and `icvacation-dev:3000`. Sandbox config GET returns 403 (admin-only). Capture preflight `service:3030` returns `unknown_service`; do not substitute another app or build a mock. Real visual evidence needs an admin to declare Loopback, or external capture of the actual deployed desktop app. Cloudflare Browser Rendering connector is available; ziopsyop.tech belongs to account `0228e3fe174bbc185f30b1d4eaf5f166` (zone lookup confirms). No DNS/config changes made.
 
 Next: deploy from an isolated source checkout on desktop using the existing upgrade/rollback mechanism, preserving local checkout and ingress; install workers to selected eligible VMs; exercise live calls. Complete /proof, update checkpoint with actual deployment and remaining items, final commit/push to same branch, list verification set after final edits and post one concise comment on PR #4. PR #4 remains already merged; branch pushes do not update main. No new PR is authorized.
+
+## Live deployment checkpoint (13:03 UTC)
+
+Desktop upgrade SUCCEEDED from 2.1.0-oauth to 4.0.0 using source `35ab185`. Backup: `~/.config/loopback/backups/pre-upgrade-2.1.0_oauth-20261024-154953.tar.gz`. Live health returns v4.0.0, admin policy, Landlock. Existing Loopback MCP still works through migrated legacy credential. Original Cloudflare connector left in place; `tailscale serve status --json` remains `{}`. No RotoXY service changed.
+
+Actual dashboard captured through connected Cloudflare Browser Rendering (server-side) with a valid session at https://loopback.ziopsyop.tech/admin. Desktop image saved in sandbox `/tmp/loopback-live-overview.jpg` (not yet final evidence; needs upload/register under existing Overview label). Initial Cloudflare call timed out; valid call needs at least two `formats` entries, e.g. screenshot + markdown.
+
+Worker installation was attempted on ora1/3/5/6/7 and aws1/2; none succeeded yet. Root cause: explicit port 22 in target registry overrides working SSH alias settings (ora1 resolves to shh-ora1.ziopsyop.tech in the desktop SSH config). Direct tailnet SSH requires interactive authentication. Do not keep retrying or change Tailscale policy. A Tailscale check URL was printed by `tailscale ssh jq@ora1`; refresh it if needed.
+
+Follow-up implementation adds `use_ssh_config` to SSH targets, preserves the alias's own port/host/user, exposes a checkbox in SSH config, handles command timeouts, and polls Fleet/Topology every five seconds. It is tested but still needs re-deploying to the desktop before these settings work there. The live MCP shell is now correctly confined and cannot write its own runtime; do not disable its sandbox or loosen sensitive-root permissions to work around that.
+
+The owner can apply final branch code from a local desktop terminal using the isolated checkout (not their original checkout):
+
+```sh
+cd ~/.local/share/loopback-deploy/source-35ab185 && git fetch origin ls/1-so-i-am-starting-this-prompt-task-with-t-_EO8 && git checkout --detach FETCH_HEAD && python3 runtime/cli.py upgrade --source . --yes
+```
+
+Then use the admin API/session or dashboard to save the seven SSH targets with `host` equal to their original working alias (`ora1`, etc.) and `use_ssh_config: true`, install workers, and check actual install logs/readiness. Do not use ora2 or ora4. Finish visual proof using real deployed dashboard captures and register current artifacts under existing labels; do not leave stale captures unaddressed. New flow diagrams are staged in `/tmp/flow-diff` (Mermaid CLI and headless browser installed solely for diagrams, not application screenshots). New runtime/tests/docs remain on the task branch; no new PR has been opened. PR #4 was already merged before this continuation.

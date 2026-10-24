@@ -83,6 +83,23 @@ class WorkerTests(unittest.TestCase):
         self.assertNotIn('worker', c)
         self.assertNotIn('secret', json.dumps(c))
 
+    def test_ssh_alias_settings_are_preserved_when_selected(self):
+        from ssh_targets import SSHTargetStore
+        ctx = SimpleNamespace(cfg_dir=self.root, identity=SimpleNamespace(home=str(self.root), username='alice'), topology=None)
+        store = SSHTargetStore(ctx)
+        store.upsert(name='alias', host='ora1', use_ssh_config=True)
+        target = store.get('alias')
+        self.assertTrue(target['use_ssh_config'])
+        with patch('ssh_targets.shutil.which', return_value='/usr/bin/ssh'):
+            argv = store._ssh_args(target)
+        self.assertNotIn('-p', argv)
+        self.assertEqual(argv[-1], 'ora1')
+        self.assertNotIn('alice@ora1', argv)
+        manager = WorkerManager(SimpleNamespace(cfg_dir=self.root, ssh=store))
+        with patch('workers.subprocess.run', side_effect=__import__('subprocess').TimeoutExpired('ssh', 30)):
+            with self.assertRaises(__import__('subprocess').TimeoutExpired):
+                manager.install('alias')
+
     def test_local_state_outside_runtime(self):
         self.manager.install('local')
         self.assertTrue((self.root / 'worker/worker_bridge.py').exists())
@@ -112,6 +129,29 @@ class WorkerApiTests(unittest.TestCase):
 
 
 class BridgeTests(unittest.TestCase):
+    def test_http_proxy_streams_without_forwarding_client_credentials(self):
+        import httpx
+        from auth import AuthStore
+        from worker_bridge import create_app
+        root = Path(tempfile.mkdtemp())
+        b = binding(transport='http', upstream='http://127.0.0.1:9080/mcp')
+        node_agent.write_json(root / 'binding.json', b)
+        node_agent.write_json(root / 'config.json', {'port':3031,'maintenance':{'update_channel':'off'}})
+        auth = AuthStore(root, resource_uris=['http://127.0.0.1:3031/mcp'], base_urls=['http://127.0.0.1:3031'])
+        token, _ = auth.create_api_token('test', ['loopback:exec'], ttl_seconds=60, created_by='tests')
+        def respond(request):
+            self.assertNotIn('authorization', request.headers)
+            self.assertNotIn('cookie', request.headers)
+            self.assertNotIn('x-api-key', request.headers)
+            return httpx.Response(200, stream=httpx.ByteStream(b'proxied-body'), headers={'content-type':'application/json'})
+        upstream = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        with patch.dict(os.environ, {'LOOPBACK_CONFIG_DIR':str(root)}), patch('worker_bridge.httpx.AsyncClient', return_value=upstream):
+            with TestClient(create_app(root)) as client:
+                response = client.post('/mcp', headers={'Authorization':'Bearer '+token,'Cookie':'foreign=credential','X-Api-Key':'foreign'}, json={'jsonrpc':'2.0','id':1,'method':'tools/list'})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.content, b'proxied-body')
+                self.assertGreater(node_agent.read_json(root/'traffic.json')['rx_bytes'], 0)
+
     def test_real_stdio_roundtrip_with_separate_auth_and_no_local_shell_tools(self):
         from auth import AuthStore
         from worker_bridge import create_app

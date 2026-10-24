@@ -8,7 +8,7 @@ they do not pass through an SSH connection to your computer.
 ## From the dashboard
 
 1. Add a machine under **SSH config** using an account that can run Python 3.11+
-   and create a virtual environment. An existing SSH alias works; keys stay local.
+   and create a virtual environment. For an existing SSH alias, tick **Use SSH alias settings** to preserve its host, port and user settings. Keys stay local.
 2. In **Fleet**, choose **Install / update**. Code and a dedicated Python virtual
    environment go under `~/.local/share/loopback-worker`. Dependency installation
    runs in the background; inspect `setup.log` there if it fails.
@@ -80,7 +80,7 @@ Overview, Fleet and Topology distinguish host counters from Loopback counters:
 - Heartbeat is the last successful SSH sample. An unreachable worker shows its
   last heartbeat, never an old measurement labelled live.
 
-Overview and service state refresh every five seconds while visible. Editing
+Overview, Fleet, Topology and service state refresh every five seconds while visible. Editing
 forms are preserved. Topology shows process health separately from public
 reachability; a launched process does not prove DNS, certificates or a public MCP
 client connection work.

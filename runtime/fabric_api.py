@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import subprocess
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -85,6 +86,8 @@ def _handler(fn: Any) -> Any:
             return await fn(request)
         except _HTTPError as exc:
             return _err(exc.status, exc.detail, **exc.extra)
+        except subprocess.TimeoutExpired:
+            return _err(504, "Worker command timed out; check SSH connectivity and target setup")
         except KeyError as exc:
             msg = exc.args[0] if exc.args else "not found"
             return _err(404, str(msg))
@@ -218,7 +221,7 @@ def routes(ctx: Any) -> list[Route]:
     async def ssh_upsert(request: Request) -> JSONResponse:
         ssh = _require(getattr(ctx, "ssh", None), "ssh")
         body = await _body(request)
-        allowed = ("name", "host", "port", "user", "identity_file", "display_name", "kind", "group", "via")
+        allowed = ("name", "host", "port", "user", "identity_file", "display_name", "kind", "group", "via", "use_ssh_config")
         fields = {k: body[k] for k in allowed if k in body}
         name = fields.get("name")
         if not isinstance(name, str):
