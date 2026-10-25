@@ -1,5 +1,9 @@
 # Loopback continuation checkpoint
 
+> Superseded by [HANDOFF-2026-10-25.md](HANDOFF-2026-10-25.md). Read that document
+> first for the current merged/deployed state, deferred startup update, redesign
+> request and remaining limits. The entries below are historical checkpoints.
+
 Updated: 2026-10-24. Task ITSCOM-1; PR https://github.com/p5n-n3t/loopback/pull/4.
 Working branch: `ls/1-so-i-am-starting-this-prompt-task-with-t-_EO8`.
 
