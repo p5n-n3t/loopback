@@ -1,133 +1,126 @@
 # Loopback continuation checkpoint — 2026-10-27
 
-Read this checkpoint before the historical handoff. This is a quota-recovery save,
-not a claim that the dashboard project is complete.
+**Verified with deployment open items.** The integration fixes work in the real
+sandbox application. They are not installed on the owner's desktop or VMs yet.
+Read this checkpoint before the historical `HANDOFF-2026-10-25.md`.
 
-## Latest integration milestone
-
-This section supersedes the first-save observations below. The commit containing
-this update saves the next integration milestone on the same assigned branch.
-
-- Fix worker Connect links to include the one-time code fragment that enrollment
-  consumes. Reject enrollment for a stopped worker bridge.
-- Complete worker enrollment with an authenticated connection page that shows its
-  MCP URL and OAuth instructions. Preserve gateway enrollment behavior.
-- Fix private endpoints after a public exposure change. Retained Cloudflare
-  hostnames no longer change private OAuth origins or advertised URLs.
-- Normalize the validated Tailscale HTTPS default before starting a service.
-- Distinguish untested, stale, stopped and unreachable process states in topology.
-  Never display expired worker CPU/RAM counters as live measurements.
-- All 136 Python tests and five Node tests pass. The new enrollment test follows
-  the real HTTP redirect to the final connection page and verifies its session.
-- Fresh SSH metrics succeed on all seven eligible VMs. `ora1-system` is running.
-  No ora2/ora4 action was taken. No live service or tunnel was changed.
-- Fresh desktop observations: systemd user service is enabled and active. Its
-  Cloudflare child is running. The isolated deployment source is clean at
-  `05bbd87`, which includes the previous startup repair. Restart/idempotent-up and
-  deployment of THIS branch still require authorized local runtime access.
-- Preview blocker resolved without changing stack configuration: port 3000 was
-  free. RotoXY actually listens on 2030. The real Loopback app now runs on the
-  declared `dev:3000` with isolated config at `/tmp/loopback-recovery-proof`.
-  The earlier 3030 preview was stopped. RotoXY remains untouched.
-- Next: refresh `/proof` on the full branch diff, capture the actual app and
-  worker connection page, save the resulting evidence, and push the checkpoint.
-  No current PR exists. Do not create one without resolving the owner's earlier
-  instruction to use an existing PR.
-
-## Branch and saved work
+## Branch and saved revisions
 
 - Branch: `ls/16-review-handoff-and-update-dashboard-desi-1o9R`.
-- Starting commit: `d3e00db` (also the current `origin/main`). Commit `57f7ba3`
-  saves the tested recovery fix and initial checkpoint. It is pushed to origin.
-  Use `git log -1` for the latest checkpoint revision.
-- The assigned remote branch does not exist before this save. The required pull
-  returns `fatal: couldn't find remote ref ls/16-review-handoff-and-update-dashboard-desi-1o9R`.
-- GitHub lists PRs #1–#7 as merged and no open PR. Lightsprint returns no linked
-  PR for task `U0KwdNIId2CEBU7bMC8S5`. Do not claim a push updates an existing PR.
-  The user forbids creating a new PR. Save to the assigned branch and resolve the
-  missing PR destination with the owner before any new PR action.
+- Base: `d3e00db` (`origin/main`). `57f7ba3` saves recovery controls. `dbfa761`
+  saves the first proof checkpoint. `83ea1ca` saves the enrollment, origins and
+  topology fixes. The latest commit adds the standard test-run integration and
+  this refreshed checkpoint. Use `git log -1` for its exact revision.
+- Pushes use this same branch. After the final push, the working tree is clean.
+- The assigned remote branch initially did not exist. It now exists on origin.
+- GitHub lists PRs #1–#7 as merged. Lightsprint returns no linked PR for task
+  `U0KwdNIId2CEBU7bMC8S5`. No new PR was created because the launch explicitly
+  prohibited it. Resolve the PR destination with the owner before creating one.
 
-## Completed in this continuation
+## Completed changes
 
-- Preserve the existing implementation and inspect only relevant handoff sections.
-- Fix Services & tunnels recovery: show Start when a healthy worker reports no
-  running process for a service whose saved desired state is running.
-- Preserve Stop so users can clear desired state before editing or deleting.
-- Add five Node regression tests for crashes, reboot state loss, running services,
-  unreachable workers, intentionally stopped services and polling transitions.
-- Confirm authenticated live desktop MCP access and local `/healthz` success.
-- Confirm a real SSH command and worker metrics on ora1. Its `ora1-system`
-  process is running. Cached topology previously reported it unreachable, so do
-  not treat that cached status as fresh process evidence.
-- Read current desktop Tailscale Serve configuration: `{}`. Change no routes.
-  Latest topology probes report healthy SSH links to all seven eligible targets.
+- Show recovery Start beside Stop when healthy worker telemetry confirms that a
+  desired-running service lost its bridge. Polling updates those controls.
+- Include the one-time code fragment in worker enrollment links. Reject
+  credential creation for stopped bridges.
+- End worker enrollment on an authenticated connection page with the service's
+  MCP URL, OAuth instructions and sign out. Preserve gateway enrollment behavior.
+- Escape connection-page content and retain CSP, no-store and nosniff headers.
+- Ignore retained public hostnames when a service changes to private exposure.
+  Its advertised endpoint and OAuth origin remain local.
+- Apply the validated default Tailscale HTTPS port before service startup.
+- Distinguish cold, stale, stopped and unreachable worker states in topology.
+  Hide expired CPU/RAM values and retain the last heartbeat.
+- Run the five browser-free Node regressions through normal unittest discovery
+  when Node.js is available. The existing CI therefore exercises them too.
 
-## Validation and environment
+## Checks and runtime evidence
 
-- Full Python suite: 123 tests pass again after the fix (9.745 seconds).
-- Focused dashboard suite after the fix: four tests pass.
-- Node regression suite: five tests pass. Run:
+- **137 Python tests pass**, including the wrapper for **five Node tests**.
+- Ruff passes across runtime, tests and scripts. Bandit finds no medium/high
+  issues. JavaScript syntax and `git diff --check` pass.
+- Actual HTTP integration: missing MCP credential returns 401, enrollment reaches
+  the final connection page, PKCE exchange succeeds, and the real stdio `echo`
+  tool returns `worker-oauth-roundtrip`. Revocation makes that token return 401.
+  No bearer token or password is stored in this checkpoint.
+- This runtime test uses isolated sandbox data and actual processes. It does not
+  prove a ChatGPT/Perplexity browser integration or a new public VM endpoint.
+- Fresh read-only SSH metrics succeed on ora1, ora3, ora5, ora6, ora7, aws1 and
+  aws2. `ora1-system` is running. Ora2/ora4 remain untouched.
+- Desktop observations: systemd user service is enabled and active. Its
+  Cloudflare child runs. The isolated deployment source is clean at `05bbd87`.
+  Local health succeeds. Current Tailscale Serve configuration is `{}`.
+- No live runtime, worker, credential, DNS or tunnel was changed. RotoXY remains
+  untouched. No reboot or deliberate live disconnection was attempted.
+
+## Proof
+
+`/proof` routes the full branch diff to visual and logic proof. It charts four
+changed flows. Every flow has passing test or runtime evidence. Tests and
+checkpoint text add no separate runtime flow.
+
+The task has seven real UI captures and four flow charts. The earlier missing
+service capture failures were replaced. The final set must have zero failed
+entries and `staleCount: 0`. Source hashes, not capture age, determine freshness.
+
+- [Recovery before start](https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/EOoU2l1llDdIUf-5Sdewb.png)
+- [Recovery after start and reload](https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/DObN2Bc_KcTn7osyLHZYv.png)
+- [Usable Connect link](https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/ZTshZIJGLyqPJKbMId4-G.png)
+- [Worker enrollment complete](https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/SesTV_vAE-MeP_BDzagoZ.png)
+- [Recovery flow](https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-27/G_3JBMKSAjTs5u68nOXdT.png)
+- [Enrollment flow](https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-27/w9XIeWGrIb8JTJFI6GyDu.png)
+- [Service origins flow](https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-27/ueI5urqJDOglB2LjcAdJM.png)
+- [Worker freshness flow](https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-27/EcuLzaE8HU6sG91o5AZvE.png)
+
+The worker desktop capture returned a valid image while the listing later marked
+it timed out. The returned image was downloaded and visually inspected, then
+registered again under the same label. No failed image was substituted.
+
+## Preview and reproducibility
+
+- The real controller runs at `dev:3000`, route `/admin#/services`, with isolated
+  data at `/tmp/loopback-recovery-proof`. A real test worker listens on 3031.
+- Port 3000 was free. The configured RotoXY process listens separately on 2030.
+  No stack configuration or unrelated app was changed. The earlier 3030 preview
+  was stopped. The controller was restored after worker-page captures.
+- Python dependencies: `/tmp/loopback-dashboard-venv`. Recreate a venv and install
+  `requirements.txt` after sandbox replacement. Run:
+  `python -m unittest discover -s tests -v` and
   `node --test tests/dashboard_services.test.cjs`.
-- JavaScript syntax and `git diff --check` pass.
-- Python dependencies exist only in `/tmp/loopback-dashboard-venv` in this sandbox.
-  Recreate a virtual environment and install `requirements.txt` after a rebuild.
-- Uncommitted work after the recovery commit: none expected. Check `git status`.
+- Stop the isolated preview worker before the full suite. An existing listener
+  protection test expects its fixture port 3031 to be free. Restore it afterward.
+- Diagram rendering used a browser only for Mermaid. Application screenshots ran
+  server-side through Lightsprint. No screenshot browser ran in the sandbox.
 
-## Proof status at the final save
+## Remaining work and access limits
 
-`/proof` compares merge-base `d3e00db` with this branch. It routes to
-`/visual-proof` for the service controls and `/logic-proof` for their selection.
-The documentation and test additions change no separate runtime flow.
+1. Resolve the missing PR destination with the owner. Do not claim that these
+   pushes updated an existing PR. Do not mark the task Done.
+2. Install this branch from the owner's local desktop terminal. The connected
+   MCP shell deliberately denies its own runtime. Do not weaken its sandbox.
+   The known clean source checkout is
+   `~/.local/share/loopback-deploy/source-35ab185`. Fetch the assigned branch,
+   detach at FETCH_HEAD, then use the existing updater. Preserve the original
+   `/home/jq/loopback` checkout and all credentials.
+3. After desktop deployment, update the seven eligible worker installations and
+   restart only the chosen service when needed. Existing processes do not load
+   new code merely because worker files change.
+4. Verify the installed dashboard, idempotent `loopback up`, existing connector,
+   and one real worker enrollment/call. Do not interrupt the only remote link.
+5. A real public MCP client browser flow remains unverified. Creating new public
+   endpoints needs an intended hostname, origin and target-local credentials.
 
-- **Proven:** the service recovery control-selection flow. Five Node tests execute
-  the shipped services view with API fixtures, including polling transitions.
-- Diagram: [Service Recovery — Changed Steps](https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-27/ht_VnUa4DnS7nIMwNA3Cl.png).
-  It is registered in this task's verification set. A browser was used only to
-  render this Mermaid diagram, never to capture an application screenshot.
-- **Blocked visual proof, harness gap:** both `Services — Recovery Controls` and
-  `Services — Navigation Entry` fail with `failureClass: unknown_service`.
-  Exact reason: `unknown service "3030" — this stack runs: dev (3000). Select a
-  configured preview service, or fix or start it; otherwise report verification
-  as blocked. Do not build a stand-in.` Exact note: `No screenshot was captured,
-  and this view is recorded as ⚠️ failed in the verification set until a later
-  shot with the SAME label succeeds. Do NOT retry the identical call.`
-- The real application runs in this sandbox on port 3030 with isolated data at
-  `/tmp/loopback-recovery-proof`. Its health and authenticated workers API both
-  return HTTP 200. The recovery binding is explicitly seeded, not a deployed VM.
-  The app needs a declared service before standard capture can reach it.
-- No deployed runtime, worker, tunnel or credential was changed during this save.
+The existing design is preserved. A broad redesign needs concrete owner
+requirements. Automatic VM reboot recovery and advanced stdio callbacks remain
+existing limitations in `WORKERS.md`, not newly implemented features.
 
-## Remaining tasks, in priority order
+## Model and recovery policy
 
-1. Finish blocked visual proof. Capture the Services & tunnels entry and recovery
-   state under the SAME labels above. The flow diagram and test evidence are
-   complete. Do not represent visual proof or the whole project as complete.
-2. Resolve preview access. `/tmp/service-manifest.json` declares only
-   `dev:3000`, owned by the unrelated token2oauth repo. Do not replace that app.
-   Reading stack sandbox configuration returns HTTP 403, `Only admins can view
-   sandbox configuration`. An admin must declare a separate Loopback service for
-   standard server-side captures. No browser was installed for screenshots.
-3. Investigate the difference between fresh ora1 metrics and cached service
-   topology status. Do not stop healthy deployed services merely to reproduce it.
-4. Verify the deferred desktop startup update through authorized access. The live
-   MCP shell remains confined and denies its own runtime. Do not weaken it.
-   Historical local-terminal update steps are in `HANDOFF-2026-10-25.md`.
-5. Resolve the missing open PR destination. Post the final summary only to the
-   correct PR after the final push. Do not create another PR without authorization.
-6. Obtain concrete redesign direction before any broad visual rewrite. Existing
-   public remote OAuth/client flows and reboot recovery remain unverified.
+Explicit subagent model and reasoning selection work. Switching the active parent
+model programmatically is unavailable. Sol with medium reasoning handles the
+engineering changes. No Astra escalation is needed so far.
 
-## Model policy and continuation
-
-Explicit subagent model selection and reasoning effort are available. Programmatic
-switching of the active parent model is not available. A bounded engineering task
-used `gpt-6.1-sol` with medium reasoning. It completed without escalation.
-
-Use `gpt-6-luna` for routine inspection and checkpoint work. Use `gpt-6.1-sol` for
-the next integration task. Dispatch `gpt-6-astra` only for a concrete security or
-architecture risk, or after two distinct evidence-based approaches fail. Give it
-only the relevant files, errors, attempts and a narrow deliverable. No Astra agent
-is currently running. Never change provider credentials to switch models.
-
-Keep ora2/ora4 untouched. Preserve the desktop checkout, credentials, existing
-tunnels and RotoXY routes. Do not merge or mark the task Done during this save.
+Use Luna for routine tasks and Sol for engineering. Dispatch `gpt-6-astra` only for
+an unresolved security/architecture risk or after two distinct evidence-based
+approaches fail. Give it relevant files, errors, attempted solutions and a narrow
+deliverable. Return to Sol afterward. Never change provider credentials.
