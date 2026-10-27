@@ -154,6 +154,8 @@ def stop_binding(directory, state):
 
 def start_binding(root, b):
     validate(b)
+    if b['exposure'].startswith('tailscale-'):
+        b.setdefault('https_port', 8443)
     directory = root / 'bindings' / b['name']
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     old = read_json(directory / 'state.json', {})
@@ -178,7 +180,8 @@ def start_binding(root, b):
         b['hostname'] = str(status['Self']['DNSName']).rstrip('.')
     if b['exposure'] == 'cloudflare' and not Path(b['token_file']).expanduser().is_file():
         raise ValueError('Cloudflare token file does not exist on target')
-    config = {'port': b['port'], 'bind': '127.0.0.1', 'public_host': b.get('hostname') or 'localhost'}
+    config = {'port': b['port'], 'bind': '127.0.0.1',
+              'public_host': (b.get('hostname') if b['exposure'] != 'private' else None) or 'localhost'}
     if b['exposure'].startswith('tailscale-') and b['https_port'] != 443:
         config['public_host'] += ':' + str(b['https_port'])
     write_json(directory / 'config.json', config)
@@ -221,7 +224,7 @@ def start_binding(root, b):
 
 
 def endpoint(b):
-    host = b.get('hostname')
+    host = b.get('hostname') if b.get('exposure') != 'private' else None
     if host:
         port = b.get('https_port', 443) if b.get('exposure', '').startswith('tailscale-') else 443
         return f"https://{host}" + (f':{port}' if port != 443 else '') + '/mcp'
@@ -288,13 +291,13 @@ def dispatch(root, payload):
     if action == 'stop':
         return stop_binding(directory, state)
     if action == 'credential':
-        if not state.get('binding'):
+        if not state.get('binding') or not alive(state.get('bridge')):
             raise ValueError('Start this binding before enrolling')
         # Use the same auth implementation as the gateway; never return the machine token.
         from auth import AuthStore
         auth = AuthStore(directory, resource_uris=[endpoint(state['binding'])], base_urls=[endpoint(state['binding']).removesuffix('/mcp')])
         code = auth.create_enrollment()
-        return {'url': endpoint(state['binding']).removesuffix('/mcp') + '/admin/enroll', 'code': code}
+        return {'url': endpoint(state['binding']).removesuffix('/mcp') + '/admin/enroll#code=' + code, 'code': code}
     raise ValueError('Unknown worker action')
 
 

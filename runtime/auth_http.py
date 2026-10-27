@@ -125,6 +125,15 @@ def _page(title: str, body: str) -> str:
 <meta name="referrer" content="no-referrer"><title>{html.escape(title)}</title><style>{_STYLE}</style></head><body><main class="card">{body}</main></body></html>"""
 
 
+def render_worker_connection(name: str, endpoint: str) -> str:
+    return _page("Loopback · Service connection", f"""<div class="brand">LOOPBACK</div>
+<h1>Service access is ready</h1><p>Connect to <b>{html.escape(name)}</b> from your MCP client.</p>
+<label for="mcp-url">MCP URL</label><input id="mcp-url" value="{html.escape(endpoint, quote=True)}" readonly>
+<p class="small">Add this URL to your MCP client and choose OAuth. Authorize with this service's password.</p>
+<p class="small">This worker serves only its configured MCP upstream. Manage its service settings from the controller.</p>
+<a href="/admin/logout">Sign out</a>""")
+
+
 def render_login(host: str, error: str = "", next_path: str = "/admin", password_set: bool = True) -> str:
     err = f'<div class="err">{html.escape(error)}</div>' if error else ""
     hint = ("Sign in with your dashboard password." if password_set

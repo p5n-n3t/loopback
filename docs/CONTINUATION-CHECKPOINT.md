@@ -1,5 +1,8 @@
 # Loopback continuation checkpoint
 
+> Current recovery save: [CONTINUATION-2026-10-27.md](CONTINUATION-2026-10-27.md).
+> Read it first. The remaining entries below describe earlier sessions.
+
 > Superseded by [HANDOFF-2026-10-25.md](HANDOFF-2026-10-25.md). Read that document
 > first for the current merged/deployed state, deferred startup update, redesign
 > request and remaining limits. The entries below are historical checkpoints.
