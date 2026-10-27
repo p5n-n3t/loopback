@@ -6,8 +6,9 @@ not a claim that the dashboard project is complete.
 ## Branch and saved work
 
 - Branch: `ls/16-review-handoff-and-update-dashboard-desi-1o9R`.
-- Starting commit: `d3e00db` (also the current `origin/main`). The commit containing
-  this checkpoint saves the recovery fix. Use `git log -1` for its exact revision.
+- Starting commit: `d3e00db` (also the current `origin/main`). Commit `57f7ba3`
+  saves the tested recovery fix and initial checkpoint. It is pushed to origin.
+  Use `git log -1` for the latest checkpoint revision.
 - The assigned remote branch does not exist before this save. The required pull
   returns `fatal: couldn't find remote ref ls/16-review-handoff-and-update-dashboard-desi-1o9R`.
 - GitHub lists PRs #1–#7 as merged and no open PR. Lightsprint returns no linked
@@ -32,7 +33,7 @@ not a claim that the dashboard project is complete.
 
 ## Validation and environment
 
-- Full Python suite: 123 tests pass before the JavaScript-only fix.
+- Full Python suite: 123 tests pass again after the fix (9.745 seconds).
 - Focused dashboard suite after the fix: four tests pass.
 - Node regression suite: five tests pass. Run:
   `node --test tests/dashboard_services.test.cjs`.
@@ -41,11 +42,35 @@ not a claim that the dashboard project is complete.
   Recreate a virtual environment and install `requirements.txt` after a rebuild.
 - Uncommitted work after the recovery commit: none expected. Check `git status`.
 
+## Proof status at the final save
+
+`/proof` compares merge-base `d3e00db` with this branch. It routes to
+`/visual-proof` for the service controls and `/logic-proof` for their selection.
+The documentation and test additions change no separate runtime flow.
+
+- **Proven:** the service recovery control-selection flow. Five Node tests execute
+  the shipped services view with API fixtures, including polling transitions.
+- Diagram: [Service Recovery — Changed Steps](https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-27/ht_VnUa4DnS7nIMwNA3Cl.png).
+  It is registered in this task's verification set. A browser was used only to
+  render this Mermaid diagram, never to capture an application screenshot.
+- **Blocked visual proof, harness gap:** both `Services — Recovery Controls` and
+  `Services — Navigation Entry` fail with `failureClass: unknown_service`.
+  Exact reason: `unknown service "3030" — this stack runs: dev (3000). Select a
+  configured preview service, or fix or start it; otherwise report verification
+  as blocked. Do not build a stand-in.` Exact note: `No screenshot was captured,
+  and this view is recorded as ⚠️ failed in the verification set until a later
+  shot with the SAME label succeeds. Do NOT retry the identical call.`
+- The real application runs in this sandbox on port 3030 with isolated data at
+  `/tmp/loopback-recovery-proof`. Its health and authenticated workers API both
+  return HTTP 200. The recovery binding is explicitly seeded, not a deployed VM.
+  The app needs a declared service before standard capture can reach it.
+- No deployed runtime, worker, tunnel or credential was changed during this save.
+
 ## Remaining tasks, in priority order
 
-1. Run `/proof` on the branch diff. Capture the Services & tunnels entry and
-   recovery state. Add the recovery flow diagram and test evidence. Proof is
-   pending at this emergency save and must not be represented as complete.
+1. Finish blocked visual proof. Capture the Services & tunnels entry and recovery
+   state under the SAME labels above. The flow diagram and test evidence are
+   complete. Do not represent visual proof or the whole project as complete.
 2. Resolve preview access. `/tmp/service-manifest.json` declares only
    `dev:3000`, owned by the unrelated token2oauth repo. Do not replace that app.
    Reading stack sandbox configuration returns HTTP 403, `Only admins can view
