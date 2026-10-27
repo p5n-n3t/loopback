@@ -3,6 +3,37 @@
 Read this checkpoint before the historical handoff. This is a quota-recovery save,
 not a claim that the dashboard project is complete.
 
+## Latest integration milestone
+
+This section supersedes the first-save observations below. The commit containing
+this update saves the next integration milestone on the same assigned branch.
+
+- Fix worker Connect links to include the one-time code fragment that enrollment
+  consumes. Reject enrollment for a stopped worker bridge.
+- Complete worker enrollment with an authenticated connection page that shows its
+  MCP URL and OAuth instructions. Preserve gateway enrollment behavior.
+- Fix private endpoints after a public exposure change. Retained Cloudflare
+  hostnames no longer change private OAuth origins or advertised URLs.
+- Normalize the validated Tailscale HTTPS default before starting a service.
+- Distinguish untested, stale, stopped and unreachable process states in topology.
+  Never display expired worker CPU/RAM counters as live measurements.
+- All 136 Python tests and five Node tests pass. The new enrollment test follows
+  the real HTTP redirect to the final connection page and verifies its session.
+- Fresh SSH metrics succeed on all seven eligible VMs. `ora1-system` is running.
+  No ora2/ora4 action was taken. No live service or tunnel was changed.
+- Fresh desktop observations: systemd user service is enabled and active. Its
+  Cloudflare child is running. The isolated deployment source is clean at
+  `05bbd87`, which includes the previous startup repair. Restart/idempotent-up and
+  deployment of THIS branch still require authorized local runtime access.
+- Preview blocker resolved without changing stack configuration: port 3000 was
+  free. RotoXY actually listens on 2030. The real Loopback app now runs on the
+  declared `dev:3000` with isolated config at `/tmp/loopback-recovery-proof`.
+  The earlier 3030 preview was stopped. RotoXY remains untouched.
+- Next: refresh `/proof` on the full branch diff, capture the actual app and
+  worker connection page, save the resulting evidence, and push the checkpoint.
+  No current PR exists. Do not create one without resolving the owner's earlier
+  instruction to use an existing PR.
+
 ## Branch and saved work
 
 - Branch: `ls/16-review-handoff-and-update-dashboard-desi-1o9R`.

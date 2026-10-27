@@ -569,27 +569,41 @@ class TopologyBuilder:
         manager = getattr(ctx, "workers", None)
         snapshot = getattr(manager, "cache", None) or {}
         workers = {w["target"]: w for w in snapshot.get("workers", [])}
+
+        def worker_status(worker: dict[str, Any]) -> str:
+            checked = snapshot.get("sampled_at") or worker.get("sampled_at")
+            if not worker or not checked:
+                return "untested"
+            if time.time() - float(checked) > self.stale_after_seconds:
+                return "stale"
+            return worker.get("status", "untested")
+
         for node in nodes:
             target = "local" if node["id"] == "gateway" else node["id"].removeprefix("ssh:")
             if target in workers:
                 worker = workers[target]
-                node["detail"]["worker_metrics"] = worker.get("worker")
-                node["detail"]["host_metrics"] = worker.get("host")
+                fresh = worker_status(worker) == "healthy"
+                node["detail"]["worker_metrics"] = worker.get("worker") if fresh else None
+                node["detail"]["host_metrics"] = worker.get("host") if fresh else None
+                node["detail"]["worker_status"] = worker_status(worker)
                 node["detail"]["heartbeat_at"] = worker.get("heartbeat_at")
         for binding in manager.bindings() if manager else []:
             target = binding["target"]
             worker = workers.get(target, {})
             runtime = next((x for x in worker.get("bindings", []) if x["name"] == binding["name"]), {})
+            health = worker_status(worker)
+            service_status = ("healthy" if runtime.get("running") else "disconnected") if health == "healthy" else health
             nid = "service:" + binding["name"]
             exposure = {"private": "local", "tailscale-serve": "tailnet", "tailscale-funnel": "public", "cloudflare": "public"}[binding["exposure"]]
             nodes.append({"id": nid, "type": "mcp-service", "kind": "unknown", "label": binding["name"], "group": target,
-                          "status": "healthy" if runtime.get("running") else "disconnected" if worker.get("status") == "healthy" else "unreachable",
+                          "status": service_status,
                           "detail": {"target": target, "transport": binding["transport"], "exposure": exposure,
                                      "port": binding["port"], "url": runtime.get("url") or binding.get("url"),
+                                     "heartbeat_at": worker.get("heartbeat_at"),
                                      "note": "Status measures the worker process, not public endpoint reachability"}})
             edges.append({"id": "host->" + nid, "from": "gateway" if target == "local" else "ssh:" + target,
                           "to": nid, "transport": binding["transport"], "protocol": "mcp", "exposure": "local",
-                          "status": "healthy" if runtime.get("running") else "untested", "direct": True, "proxied": False,
+                          "status": service_status, "direct": True, "proxied": False,
                           "detail": {"note": "Service runs here; this edge is hosting, not SSH data forwarding"}})
             if exposure != "local":
                 edges.append({"id": "clients->" + nid, "from": "clients", "to": nid,

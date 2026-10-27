@@ -100,6 +100,44 @@ class WorkerTests(unittest.TestCase):
             with self.assertRaises(__import__('subprocess').TimeoutExpired):
                 manager.install('alias')
 
+    def test_private_endpoint_ignores_retained_public_hostname(self):
+        private = binding(hostname='old.example.com', https_port=8443)
+        self.assertEqual(node_agent.endpoint(private), 'http://127.0.0.1:3031/mcp')
+        self.assertEqual(node_agent.endpoint(binding(exposure='cloudflare', hostname='tools.example.com')),
+                         'https://tools.example.com/mcp')
+        self.assertEqual(node_agent.endpoint(binding(exposure='tailscale-serve', hostname='worker.ts.net',
+                                                    https_port=8443)), 'https://worker.ts.net:8443/mcp')
+
+    def test_credential_refuses_stopped_binding(self):
+        directory = self.root / 'bindings' / 'echo'
+        node_agent.write_json(directory / 'state.json', {'binding': binding(), 'bridge': None})
+        with self.assertRaisesRegex(ValueError, 'Start this binding before enrolling'):
+            node_agent.dispatch(self.root, {'action': 'credential', 'binding': binding()})
+        self.assertFalse((directory / 'auth.db').exists())
+
+    def test_tailscale_start_uses_the_validated_default_https_port(self):
+        b = binding(exposure='tailscale-serve')
+        with patch('node_agent.alive', side_effect=lambda p: bool(p)), \
+                patch('node_agent.launch', return_value={'pid': 123, 'start': 'fixture'}), \
+                patch('node_agent.socket.socket'), patch('node_agent.socket.create_connection'), \
+                patch('node_agent.serve_config', return_value={}), \
+                patch('node_agent.run', return_value=json.dumps({'Self': {'DNSName': 'worker.ts.net.'}})) as run:
+            result = node_agent.start_binding(self.root, b)
+        self.assertEqual(result['url'], 'https://worker.ts.net:8443/mcp')
+        run.assert_any_call(['tailscale', 'serve', '--bg', '--https=8443', 'http://127.0.0.1:3031'])
+        state = node_agent.read_json(self.root / 'bindings' / 'echo' / 'state.json')
+        self.assertEqual(state['binding']['https_port'], 8443)
+
+    def test_private_start_does_not_advertise_a_retained_public_hostname(self):
+        b = binding(hostname='old.example.com')
+        with patch('node_agent.alive', side_effect=lambda p: bool(p)), \
+                patch('node_agent.launch', return_value={'pid': 123, 'start': 'fixture'}), \
+                patch('node_agent.socket.socket'), patch('node_agent.socket.create_connection'):
+            result = node_agent.start_binding(self.root, b)
+        config = node_agent.read_json(self.root / 'bindings' / 'echo' / 'config.json')
+        self.assertEqual(config['public_host'], 'localhost')
+        self.assertEqual(result['url'], 'http://127.0.0.1:3031/mcp')
+
     def test_local_state_outside_runtime(self):
         self.manager.install('local')
         self.assertTrue((self.root / 'worker/worker_bridge.py').exists())
@@ -120,6 +158,22 @@ class WorkerApiTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.cm.__exit__(None, None, None)
 
+    def test_credential_api_returns_usable_link_without_caching(self):
+        b = binding(name='enroll-api', port=3032)
+        self.assertEqual(self.c.post('/api/admin/bindings', json=b, headers=self.csrf).status_code, 201)
+        directory = self.server.CTX.workers.local_root / 'bindings' / b['name']
+        node_agent.write_json(directory / 'state.json', {'binding': b, 'bridge': {'pid': 123, 'start': 'fixture'}})
+        route = '/api/admin/bindings/enroll-api/credential'
+        self.assertEqual(self.c.post(route).status_code, 403)
+        with patch('node_agent.alive', return_value=True):
+            result = self.c.post(route, headers=self.csrf)
+        self.assertEqual(result.status_code, 200, result.text)
+        data = result.json()
+        self.assertEqual(data['url'], 'http://127.0.0.1:3032/admin/enroll#code=' + data['code'])
+        self.assertEqual(result.headers['cache-control'], 'no-store')
+        self.assertNotIn(self.server.AUTH.machine_token, result.text)
+        self.assertEqual(self.c.post('/api/admin/bindings/enroll-api/delete', headers=self.csrf).status_code, 200)
+
     def test_binding_persists_after_reload_and_requires_csrf(self):
         self.assertEqual(self.c.post('/api/admin/bindings', json=binding()).status_code, 403)
         response = self.c.post('/api/admin/bindings', json=binding(), headers=self.csrf)
@@ -129,6 +183,68 @@ class WorkerApiTests(unittest.TestCase):
 
 
 class BridgeTests(unittest.TestCase):
+    def test_dashboard_credential_link_enrolls_the_worker(self):
+        from urllib.parse import urlsplit
+        from auth import AuthStore
+        from worker_bridge import create_app
+        root = Path(tempfile.mkdtemp())
+        directory = root / 'bindings' / 'echo'
+        b = binding(transport='http', upstream='http://127.0.0.1:9080/mcp')
+        node_agent.write_json(directory / 'state.json', {'binding': b, 'bridge': {'pid': 123, 'start': 'fixture'}})
+        node_agent.write_json(directory / 'binding.json', b)
+        node_agent.write_json(directory / 'config.json', {'port': 3031, 'maintenance': {'update_channel': 'off'}})
+        with patch('node_agent.alive', return_value=True):
+            result = node_agent.dispatch(root, {'action': 'credential', 'binding': b})
+        url = urlsplit(result['url'])
+        self.assertEqual(url.path, '/admin/enroll')
+        self.assertEqual(url.query, '')
+        self.assertEqual(url.fragment, 'code=' + result['code'])
+        with patch.dict(os.environ, {'LOOPBACK_CONFIG_DIR': str(directory)}), \
+                TestClient(create_app(directory), base_url='http://127.0.0.1:3031') as client:
+            page = client.get(result['url'])
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("location.hash", page.text)
+            response = client.post(url.path, data={'code': url.fragment.removeprefix('code='),
+                'password': 'worker-password-123', 'password2': 'worker-password-123'})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.url.path, '/admin')
+            self.assertEqual([hop.status_code for hop in response.history], [303])
+            self.assertIn('Service access is ready', response.text)
+            self.assertIn('value="http://127.0.0.1:3031/mcp"', response.text)
+            self.assertNotIn('Create the dashboard password', response.text)
+            self.assertNotIn(result['code'], response.text)
+            self.assertEqual(response.headers['cache-control'], 'no-store')
+            self.assertIn("frame-ancestors 'none'", response.headers['content-security-policy'])
+            self.assertIn("default-src 'none'", response.headers['content-security-policy'])
+            self.assertNotIn('<script', response.text)
+            self.assertEqual(client.get('/api/admin/session').status_code, 200)
+        auth = AuthStore(directory, resource_uris=[node_agent.endpoint(b)],
+                         base_urls=['http://127.0.0.1:3031'])
+        self.assertTrue(auth.verify_admin_credential('worker-password-123'))
+        self.assertFalse(auth.consume_enrollment(result['code']))
+
+    def test_worker_connection_page_requires_a_session(self):
+        from worker_bridge import create_app
+        root = Path(tempfile.mkdtemp())
+        b = binding(transport='http', upstream='http://127.0.0.1:9080/mcp')
+        node_agent.write_json(root / 'binding.json', b)
+        node_agent.write_json(root / 'config.json', {'port': 3031, 'maintenance': {'update_channel': 'off'}})
+        with patch.dict(os.environ, {'LOOPBACK_CONFIG_DIR': str(root)}), \
+                TestClient(create_app(root), base_url='http://127.0.0.1:3031') as client:
+            response = client.get('/admin', follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers['location'], '/admin/login')
+            self.assertEqual(response.headers['cache-control'], 'no-store')
+            self.assertNotIn('/mcp', response.text)
+            self.assertEqual(client.get('/admin').url.path, '/admin/login')
+
+    def test_worker_connection_content_escapes_values(self):
+        from auth_http import render_worker_connection
+        page = render_worker_connection('<script>bad</script>', 'https://example.com/" onfocus="bad')
+        self.assertNotIn('<script>', page)
+        self.assertIn('&lt;script&gt;bad&lt;/script&gt;', page)
+        self.assertIn('value="https://example.com/&quot; onfocus=&quot;bad" readonly', page)
+
     def test_http_proxy_streams_without_forwarding_client_credentials(self):
         import httpx
         from auth import AuthStore

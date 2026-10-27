@@ -19,12 +19,12 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse, StreamingResponse
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from starlette.routing import Route
 
 import auth_http
 from bootstrap import build_context
-from node_agent import read_json, write_json
+from node_agent import endpoint, read_json, write_json
 
 HOP = {'host', 'connection', 'transfer-encoding', 'content-length', 'keep-alive', 'upgrade', 'proxy-authorization',
        'proxy-authenticate', 'trailer', 'te', 'set-cookie', 'authorization', 'cookie', 'x-api-key', 'api-key',
@@ -140,7 +140,13 @@ def create_app(directory):
         return JSONResponse({'ok': True, 'service': binding['name'], 'transport': binding['transport']})
 
     async def home(request):
-        return RedirectResponse('/admin/enroll')
+        if auth_http.session_from_request(ctx, request) is None:
+            return RedirectResponse('/admin/login', status_code=303, headers=auth_http.NO_STORE)
+        return HTMLResponse(auth_http.render_worker_connection(binding['name'], endpoint(binding)), headers={
+            **auth_http.NO_STORE,
+            'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+            'X-Content-Type-Options': 'nosniff',
+        })
 
     class Endpoint:
         async def __call__(self, scope, receive, send):
