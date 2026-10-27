@@ -9,13 +9,14 @@ Read this checkpoint before the historical `HANDOFF-2026-10-25.md`.
 - Branch: `ls/16-review-handoff-and-update-dashboard-desi-1o9R`.
 - Base: `d3e00db` (`origin/main`). `57f7ba3` saves recovery controls. `dbfa761`
   saves the first proof checkpoint. `83ea1ca` saves the enrollment, origins and
-  topology fixes. The latest commit adds the standard test-run integration and
-  this refreshed checkpoint. Use `git log -1` for its exact revision.
+  topology fixes. `746ab48` adds the standard test-run integration and proof
+  checkpoint. Use `git log -1` for the latest delivery checkpoint revision.
 - Pushes use this same branch. After the final push, the working tree is clean.
 - The assigned remote branch initially did not exist. It now exists on origin.
-- GitHub lists PRs #1–#7 as merged. Lightsprint returns no linked PR for task
-  `U0KwdNIId2CEBU7bMC8S5`. No new PR was created because the launch explicitly
-  prohibited it. Resolve the PR destination with the owner before creating one.
+- The owner explicitly authorized a new PR after confirming that PRs #1–#7 were
+  merged. [PR #8](https://github.com/p5n-n3t/loopback/pull/8) is now open from this
+  branch to `main` and linked to task `U0KwdNIId2CEBU7bMC8S5` (`P0Y50N-16`).
+  CI runs on Python 3.11 and 3.13. Read the current check status on the PR.
 
 ## Completed changes
 
@@ -94,8 +95,8 @@ registered again under the same label. No failed image was substituted.
 
 ## Remaining work and access limits
 
-1. Resolve the missing PR destination with the owner. Do not claim that these
-   pushes updated an existing PR. Do not mark the task Done.
+1. Inspect PR #8 and its CI results. Continue on its existing branch. Do not
+   create another PR or mark the task Done. This PR does not deploy the code.
 2. Install this branch from the owner's local desktop terminal. The connected
    MCP shell deliberately denies its own runtime. Do not weaken its sandbox.
    The known clean source checkout is
