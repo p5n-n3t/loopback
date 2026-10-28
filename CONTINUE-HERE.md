@@ -20,3 +20,15 @@ Use the cheapest adequate available model. Use Sol for integration and Luna for 
 Save validated milestones to Git and keep this checkpoint current. Do not reread every historical handoff or image.
 
 The continuation is pushed on this branch after PRs 8 and 9 merged. It is not on main or deployed. No replacement PR is opened.
+
+## Active follow-up: ora8 live test request
+
+The owner now authorizes ora8 registration, SSH through the desktop, and a small separate test environment.
+Do not stop at the earlier handoff. Finish all work available here before desktop continuation.
+Read `docs/REMOTE-LAB.md` and `docs/proof/LIVE-WORKER-INVENTORY-2026-10-28.json` for this follow-up.
+The new runner is implemented and syntax/guard checked, but it has not run on ora8 yet.
+Tailscale SSH requires an owner identity check. Ordinary SSH has no trusted ora8 key in this sandbox.
+The desktop's protected configuration prevents registry writes and password recovery through the MCP shell.
+The owner can run `loopback auth enroll` locally to set a password, without sending secrets to the agent.
+The existing ora1 worker lacks discovery. Six real host snapshots succeed. ora7 times out on the bounded attempt.
+A newly found split-argument credential-redaction defect is fixed. Eight discovery tests pass.

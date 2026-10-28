@@ -146,3 +146,33 @@ The updater requests confirmation, creates a state backup, stages the runtime, v
 These commands do not install workers on ora8 or other hosts. Do not reset Tailscale or RotoXY routes.
 If the executable or configuration path differs on the owner machine, inspect that installation before any write.
 The protected runtime directory is not accessible through this MCP shell. Do not weaken its sandbox to deploy.
+
+## Active owner follow-up — live ora8 testing
+
+The owner authorizes ora8 registration and an isolated test environment separate from jq.
+A real desktop metadata request still advertises only `token_endpoint_auth_methods_supported: [none]`.
+The desktop therefore still lacks PR 9's confidential-client fix. Do not report that deployed authentication is fixed.
+The candidate source supports public, Basic-secret, form-secret, PKCE, refresh and mixed-grant narrowing.
+Browser-specific payloads remain unknown until the actual clients run the new source.
+
+Read-only snapshots run candidate collector functions in memory on registered SSH hosts, without installing files.
+Successful hosts: ora1, ora3, ora5, ora6, aws1, aws2. ora7 times out in a 35-second bounded attempt.
+Cloudflared processes appear on ora3 and ora6. No visible Tailscale Serve/Funnel routes appear on those six hosts.
+This does not establish that a different network namespace or unreadable account has no route.
+The detailed, non-secret port inventory is `docs/proof/LIVE-WORKER-INVENTORY-2026-10-28.json`.
+The ora1 installed worker has no `discover` function. Existing installations must be updated to use new inventory.
+The first diagnostic harness exceeds SSH's argument limit. A smaller extraction then omits a function and fails.
+The corrected dependency-complete extraction succeeds on six hosts. These are diagnostic harness failures, not worker product failures.
+
+A concrete product defect is corrected: split Cloudflare token and credential-path arguments are now redacted.
+Eight discovery tests pass, including fake `/proc` split/inline argument regression coverage.
+The isolated runner at `scripts/remote-lab-smoke.sh` covers local installation, OAuth HTTP exchanges, recovery,
+repeat installation, updater backup, rollback and cleanup. Bash, Python syntax and the non-lab guard pass.
+No ora8 run is claimed. A Tailscale owner identity check and registration remain required.
+The access-check background job expires without approval. It makes no host changes.
+Never preserve the temporary Tailscale approval URL or any enrollment code in Git.
+
+Login recovery requires the owner's normal desktop terminal because `~/.config/loopback` is hard-denied to this MCP shell.
+Use `loopback auth enroll`, then open the generated localhost link to choose a password. Do not paste that link or password into chat.
+Older installed builds have password-only login. The new account username is not retroactively created by an upgrade.
+The isolated Lightsprint preview has its own test account and is not the owner's installed dashboard.
