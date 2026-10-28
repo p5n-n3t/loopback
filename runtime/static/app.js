@@ -560,8 +560,34 @@ A['remove-machine'] = async t => {
 };
 
 /* -- Independent service bindings */
+/* Read-only inventory of what already listens on each host: Tailscale Serve/Funnel handlers, cloudflared
+ * tunnels and open ports. Ownership says who controls a route; Loopback never adopts or rewrites external ones. */
+const OWN = { managed: 'ok', external: 'warn', unknown: 'off' };
+const ownerBadge = r => H`${badge(r.owner || 'unknown', OWN[r.owner] || 'off')}${r.owned_by ? H` <span class="small muted">${r.owned_by}</span>` : ''}`;
+function discoveryHtml(d) {
+  if (!d || !d.hosts) return H`<p class="muted">Discovery is unavailable in this runtime.</p>`;
+  const S = d.summary || {};
+  const hostRows = d.hosts.map(h => {
+    const routes = arr(h.routes), candidates = arr(h.listeners).filter(l => l.mcp_candidate || l.owner === 'managed');
+    const stateCell = h.status === 'ok' ? (h.partial ? H`${st('degraded')} <span class="small muted">partial</span>` : st('healthy')) : h.status === 'excluded' ? badge('excluded', 'off') : H`${st('unreachable')}${h.last_known ? H` <span class="small muted">showing last known</span>` : ''}`;
+    const head = H`<tr class="group-row" data-discovery-host="${h.target}"><td colspan="6"><span class="grow">${h.target === 'local' ? 'This machine' : h.target}${h.hostname && h.hostname !== h.target ? H` <span class="muted">· ${h.hostname}</span>` : ''}</span> ${stateCell}${h.error ? H` <span class="small muted">· ${h.error}</span>` : ''}${h.tailscale && h.tailscale.status !== 'ok' && h.status === 'ok' ? H` <span class="small muted">· tailscale ${h.tailscale.status}</span>` : ''}</td></tr>`;
+    const body = routes.length || candidates.length ? H`${routes.map(r => H`<tr data-route="${r.id}" data-owner="${r.owner}"><td>${badge(r.provider === 'tailscale' ? 'Tailscale ' + r.mode : r.provider === 'cloudflare' ? 'Cloudflare tunnel' : r.provider, r.exposure === 'public' ? 'warn' : 'info')}</td>
+        <td><code>${r.hostname || '—'}${r.port && r.port !== 443 ? ':' + r.port : ''}${r.path || ''}</code>${arr(r.hostnames).length > 1 ? H`<div class="small muted">+${r.hostnames.length - 1} more hostname(s)</div>` : ''}</td>
+        <td><code class="small">${r.target || (r.provider === 'cloudflare' ? 'configured in Cloudflare' : '—')}</code></td><td>${badge(r.exposure || 'unknown', r.exposure === 'public' ? 'bad' : r.exposure === 'tailnet' ? 'info' : 'ok')}</td><td>${ownerBadge(r)}</td><td>${r.kind === 'mcp-gateway' ? badge('MCP gateway', 'info') : ''}${r.note ? H`<div class="small muted">${r.note}</div>` : ''}</td></tr>`)}
+      ${candidates.map(l => H`<tr data-listener="${l.port}" data-owner="${l.owner}"><td>${badge('listener', 'off')}</td><td><code>${l.address}:${l.port}</code></td><td><code class="small">${l.process ? l.process + (l.pid ? ' (' + l.pid + ')' : '') : 'owner unknown'}</code></td><td>${badge(/^(127\.|::1)/.test(l.address) ? 'local' : 'bound', /^(127\.|::1)/.test(l.address) ? 'ok' : 'warn')}</td><td>${ownerBadge(l)}</td><td>${l.mcp_candidate ? badge('candidate', 'off') : ''}</td></tr>`)}` : H`<tr><td colspan="6" class="muted small">${h.status === 'ok' ? 'No tunnels, Serve/Funnel handlers or MCP candidates observed.' : 'No inventory available.'}</td></tr>`;
+    return H`${head}${body}`;
+  });
+  return H`<p class="section-desc">${S.hosts || 0} host(s) · ${S.reachable || 0} reachable · ${S.routes || 0} route(s): ${S.managed || 0} managed, ${S.external || 0} external · ${S.gateways || 0} MCP gateway(s). ${d.generated_at ? 'Scanned ' + rel(d.generated_at) + '.' : ''} ${arr(d.excluded_targets).length ? 'Never contacted: ' + d.excluded_targets.join(', ') + '.' : ''}</p>
+    ${table(['Provider', 'Public address', 'Handler target', 'Exposure', 'Owner', ''], hostRows, 'No hosts registered.')}
+    <p class="small muted">${d.note || ''}</p>`;
+}
+A['discovery-refresh'] = async t => {
+  const old = t.textContent; t.innerHTML = '<span class="spin"></span> Scanning';
+  try { const d = await post('/api/admin/discovery/refresh'); const el = $('#discovery-list'); if (el) el.innerHTML = String(discoveryHtml(d)); toast(`Scanned ${(d.summary || {}).hosts || 0} host(s)`, 'ok'); }
+  finally { if (t.isConnected) t.textContent = old; }
+};
 views.services = async v => {
-  const [fleet, ssh] = await Promise.all([get('/api/admin/workers'), get('/api/admin/ssh')]);
+  const [fleet, ssh, discovery] = await Promise.all([get('/api/admin/workers'), get('/api/admin/ssh'), soft('/api/admin/discovery')]);
   const B = fleet.bindings || [], W = fleet.workers || [], S = arr(ssh, 'targets', 'ssh');
   const edit = v.params.get('edit'), b = B.find(x => x.name === edit) || {};
   const selectedTarget = b.target || v.params.get('target') || 'local';
@@ -573,6 +599,7 @@ views.services = async v => {
   v.render(H`${head('Services & tunnels', 'Choose what runs, where it runs, and how clients reach it.', H`<a class="btn" href="#/fleet">Manage workers</a>`)}
     <div class="grid" data-testid="services-view">
       ${card('Services', H`<div id="service-list">${drawRows(fleet)}</div>`, 'c12')}
+      ${card('Discovered routes & gateways', H`<div id="discovery-list">${discoveryHtml(discovery)}</div>`, { cls: 'c12', actions: H`<button class="sm" data-act="discovery-refresh">Rescan hosts</button>` })}
       ${card(edit ? 'Edit ' + edit : 'New service', H`<form data-form="binding" data-testid="binding-form">${errBox}<div class="fields">
         ${fld('Service name', 'f_name', inp('name', b.name, {req:true, ph:'research-tools', extra:edit ? 'readonly' : 'pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,39}"'}))}
         ${fld('Run on', 'f_target', H`<select id="f_target" name="target">${['local', ...S.map(s => s.name)].map(t => opt(t, selectedTarget, t === 'local' ? 'This machine' : t))}</select>`, 'Install the worker from Fleet before starting a remote service.')}
@@ -1169,7 +1196,7 @@ F['wiz-ingress'] = async (f, o) => {
 };
 
 /* -- boot */
-const LB = { bytes, kbs, dm, ICON, api, get, put, post, del, soft, H, raw, esc, toast, modal, confirmDo, panel, rel, abs, time, badge, dot, st, kv, safeKv, table, card, head, stamp, A, C, F, I, STATUS, STATUS_LABEL, isSecretKey, scrub, arr, enc, probeHtml, state, refresh, ApiError, errorsHtml };
+const LB = { bytes, kbs, dm, ICON, discoveryHtml, api, get, put, post, del, soft, H, raw, esc, toast, modal, confirmDo, panel, rel, abs, time, badge, dot, st, kv, safeKv, table, card, head, stamp, A, C, F, I, STATUS, STATUS_LABEL, isSecretKey, scrub, arr, enc, probeHtml, state, refresh, ApiError, errorsHtml };
 window.LB = LB;
 $$('#nav a[data-route]').forEach(a => { a.insertAdjacentHTML('afterbegin', dm(a.dataset.route || 'overview', 'nav-icon')); });
 applyTheme();

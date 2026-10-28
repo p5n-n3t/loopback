@@ -331,3 +331,4 @@ input.invalid,textarea.invalid{border-color:var(--bad)}
 .nav a.active .nav-icon{fill:url(#lb-grad);opacity:1}
 .metric-icon .dmx{width:17px;height:17px}
 .machine-icon .dmx{width:18px;height:18px}
+.tn .own-mark.external .tag{fill:var(--warn)}.tn .own-mark.unknown .tag{fill:var(--off)}.tn .own-mark.managed .tag{fill:var(--ok)}

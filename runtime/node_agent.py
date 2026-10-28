@@ -307,11 +307,148 @@ def metrics(root, controller_pid=None):
                       'url': endpoint(s['binding']), 'started_at': s.get('started_at')} for s in states if s.get('binding')]}
 
 
+# --------------------------------------------------------------------------- read-only discovery
+SECRET_ARG = re.compile(r'(--token|--credentials-file|--origincert|token=)\S*', re.I)
+
+
+def _hex_addr(value):
+    host, port = value.split(':')
+    port = int(port, 16)
+    raw = bytes.fromhex(host)
+    if len(raw) == 4:
+        return socket.inet_ntoa(raw[::-1]), port
+    words = [raw[i:i + 4][::-1] for i in range(0, 16, 4)]
+    return socket.inet_ntop(socket.AF_INET6, b''.join(words)), port
+
+
+def tcp_listeners():
+    """LISTEN sockets from /proc/net/tcp{,6} with best-effort owner (own processes only)."""
+    inodes = {}
+    for table in ('tcp', 'tcp6'):
+        try:
+            lines = Path(f'/proc/net/{table}').read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            f = line.split()
+            if len(f) < 10 or f[3] != '0A':
+                continue
+            try:
+                addr, port = _hex_addr(f[1])
+            except (ValueError, OSError):
+                continue
+            inodes[f[9]] = {'address': addr, 'port': port, 'pid': None, 'process': None}
+    if inodes:
+        for proc in Path('/proc').iterdir():
+            if not proc.name.isdigit():
+                continue
+            try:
+                for fd in (proc / 'fd').iterdir():
+                    target = os.readlink(fd)
+                    if target.startswith('socket:[') and target[8:-1] in inodes:
+                        ino = inodes[target[8:-1]]
+                        ino['pid'] = int(proc.name)
+                        ino['process'] = (proc / 'comm').read_text().strip()[:40]
+            except OSError:
+                continue  # another user's process: owner stays unknown
+    out = sorted(inodes.values(), key=lambda x: (x['port'], x['address']))
+    seen, unique = set(), []
+    for item in out:
+        key = (item['address'], item['port'])
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique
+
+
+def tailscale_routes(data):
+    """Every Serve/Funnel handler (background and foreground) as flat, read-only route records."""
+    routes = []
+    configs = [(data, False)] + [(fg, True) for fg in (data.get('Foreground') or {}).values() if isinstance(fg, dict)] if isinstance(data, dict) else []
+    for cfg, foreground in configs:
+        allow = cfg.get('AllowFunnel') or {}
+        for host_port, web in (cfg.get('Web') or {}).items():
+            handlers = (web or {}).get('Handlers') or {}
+            for path, handler in handlers.items():
+                h = handler or {}
+                routes.append({'provider': 'tailscale', 'mode': 'funnel' if allow.get(host_port) else 'serve', 'host_port': host_port,
+                               'path': path, 'target': h.get('Proxy') or h.get('Path') or h.get('Text') and 'text' or None,
+                               'foreground': foreground})
+        for host_port, tcp in (cfg.get('TCP') or {}).items():
+            routes.append({'provider': 'tailscale', 'mode': 'funnel' if allow.get(host_port) else 'serve', 'host_port': str(host_port),
+                           'path': None, 'target': 'tcp:' + str((tcp or {}).get('TCPForward') or ''), 'foreground': foreground, 'tcp': True})
+    return routes
+
+
+def cloudflared_processes():
+    procs = []
+    for proc in Path('/proc').iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            if (proc / 'comm').read_text().strip() != 'cloudflared':
+                continue
+            args = (proc / 'cmdline').read_bytes().split(b'\0')
+            args = [a.decode('utf-8', 'replace') for a in args if a]
+        except OSError:
+            continue
+        safe = [SECRET_ARG.sub(r'\1=<redacted>', a) for a in args[1:]]
+        config = None
+        for i, a in enumerate(safe):
+            if a == '--config' and i + 1 < len(safe):
+                config = safe[i + 1]
+            elif a.startswith('--config='):
+                config = a.split('=', 1)[1]
+        entry = {'pid': int(proc.name), 'args': ' '.join(safe)[:300], 'config_file': config, 'ingress': []}
+        if config:
+            try:
+                for line in Path(os.path.expanduser(config)).read_text().splitlines()[:200]:
+                    key, _, value = line.strip().partition(':')
+                    key = key.strip('- ').strip()
+                    if key in ('hostname', 'service', 'tunnel') and value.strip():
+                        entry['ingress'].append({key: value.strip()[:200]})
+            except OSError:
+                entry['config_readable'] = False
+        procs.append(entry)
+    return procs
+
+
+def discover(root):
+    """Read-only host inventory: nothing here starts, stops or rewrites anything."""
+    out = {'observed_at': time.time(), 'hostname': socket.gethostname(), 'tailscale': {'status': 'ok', 'routes': [], 'dns_name': None},
+           'cloudflared': {'status': 'ok', 'processes': []}, 'listeners': {'status': 'ok', 'items': []}, 'bindings': []}
+    try:
+        out['tailscale']['routes'] = tailscale_routes(serve_config())
+        status = json.loads(run(['tailscale', 'status', '--json']))
+        out['tailscale']['dns_name'] = str((status.get('Self') or {}).get('DNSName') or '').rstrip('.') or None
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        out['tailscale'] = {'status': 'unavailable', 'routes': [], 'dns_name': None, 'error': 'tailscale not available: ' + str(exc)[:120]}
+    try:
+        out['cloudflared']['processes'] = cloudflared_processes()
+    except OSError as exc:
+        out['cloudflared'] = {'status': 'unavailable', 'processes': [], 'error': str(exc)[:120]}
+    try:
+        out['listeners']['items'] = tcp_listeners()
+    except OSError as exc:
+        out['listeners'] = {'status': 'unavailable', 'items': [], 'error': str(exc)[:120]}
+    for f in (root / 'bindings').glob('*/state.json'):
+        state = read_json(f, {})
+        b = state.get('binding') or {}
+        if b:
+            out['bindings'].append({'name': b.get('name'), 'port': b.get('port'), 'exposure': b.get('exposure'), 'https_port': b.get('https_port'),
+                                    'hostname': b.get('hostname'), 'running': alive(state.get('bridge')),
+                                    'tunnel_pid': (state.get('tunnel') or {}).get('pid') if alive(state.get('tunnel')) else None,
+                                    'tailscale_owned': bool(state.get('tailscale_owned'))})
+    return out
+
+
 def dispatch(root, payload):
     root = Path(root)
     action = payload.get('action')
     if action == 'metrics':
         return metrics(root, payload.get('controller_pid'))
+    if action == 'discover':
+        return discover(root)
     b = payload.get('binding', {})
     validate(b)
     directory = root / 'bindings' / b['name']
