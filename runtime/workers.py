@@ -168,8 +168,15 @@ class WorkerManager:
             host, worker = sample['host'], sample['worker']
             for group in (host, worker):
                 group.update(cpu_percent=None, rx_per_second=None, tx_per_second=None)
+            # Rates need two samples. "first" means the next sample makes them available;
+            # "measured" means every rate below is a real interval measurement (zero included).
+            sample['rates'] = {'state': 'first', 'interval_seconds': None}
+            if host.get('cpu_seconds') is None or host.get('memory_total') is None:
+                sample['rates']['state'] = 'unavailable'
             if prior:
                 elapsed = sample['sampled_at'] - prior['sampled_at']
+                if elapsed > 0 and sample['rates']['state'] == 'first':
+                    sample['rates'] = {'state': 'measured', 'interval_seconds': round(elapsed, 1)}
                 if elapsed > 0:
                     for key in ('host', 'worker'):
                         cur, prev = sample[key], prior[key]
@@ -187,7 +194,8 @@ class WorkerManager:
                         worker['cpu_percent'] = round(min(100, delta / elapsed / host['cpu_count'] * 100), 1)
             if host['memory_total']:
                 host['memory_percent'] = round(host['memory_used'] / host['memory_total'] * 100, 1)
-                worker['memory_percent'] = round(worker['rss_bytes'] / host['memory_total'] * 100, 1)
+                host['memory_available'] = host['memory_total'] - host['memory_used']
+                worker['memory_percent'] = round(worker['rss_bytes'] / host['memory_total'] * 100, 2)
             sample.update(target=target, status='healthy', heartbeat_at=sample['sampled_at'])
             return sample
         except Exception:

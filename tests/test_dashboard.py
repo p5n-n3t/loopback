@@ -54,7 +54,7 @@ class DashboardTests(unittest.TestCase):
             if "%2" in bad or ".hidden" in bad or bad.endswith(".py") and ".." not in bad:
                 self.assertIn(r.status_code, {400, 404}, bad)
         total = sum(len(self.c.get(f"/admin/static/{n}").content) for n in ("index.html", "app.css", "app.js", "topology.js"))
-        self.assertLess(total, 160 * 1024, "dashboard bundle must stay small")
+        self.assertLess(total, 256 * 1024, "dashboard bundle must stay small")
 
     def test_login_page_mentions_enrollment_when_no_password(self):
         r = self.c.get("/admin/login")

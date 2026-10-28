@@ -42,7 +42,9 @@ class ServerIntegrationTests(unittest.TestCase):
         self.assertTrue(catalog["node_call"]["network"])
         self.assertFalse(catalog["browser_open"]["enabled"])  # opt-in capability
         listed = rpc(self.c, self.h, "tools/list").json()["result"]["tools"]
-        self.assertEqual({t["name"] for t in listed}, set(catalog))
+        # Disabled tools (here the opt-in browser/desktop capabilities) are hidden from clients, not only refused.
+        self.assertEqual({t["name"] for t in listed}, {n for n, t in catalog.items() if t["enabled"]})
+        self.assertNotIn("browser_open", {t["name"] for t in listed})
         for name in catalog:
             self.assertIn(name, self.server.TOOL_META, f"{name} lacks scope metadata")
 

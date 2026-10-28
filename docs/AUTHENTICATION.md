@@ -72,6 +72,26 @@ Redirect URIs must be HTTPS, or a loopback HTTP address (RFC 8252 §7.3,
 `http://127.0.0.1:<port>/...` or `http://[::1]:<port>/...`) for native/CLI
 clients.
 
+### Confidential clients
+
+DCR accepts `token_endpoint_auth_method` of `none` (public), `client_secret_basic`
+or `client_secret_post`. For the two confidential methods Loopback mints a
+`client_secret` once, returns it in the registration response with
+`client_secret_expires_at: 0`, and stores only its SHA-256 hash. CIMD clients are
+always public. The token and revocation endpoints enforce the method the client
+registered: a confidential client that sends no credential, the wrong credential,
+or a `client_id` in the Basic header that differs from the form gets
+`401 invalid_client` (with `WWW-Authenticate: Basic` for Basic clients). A public
+client that sends a stray secret is still treated as public.
+
+`grant_types` is narrowed at registration to the supported subset
+(`authorization_code`, `refresh_token`); `authorization_code` is required and
+`response_types` must include `code`. A token request for a grant the client did
+not register is refused with `unauthorized_client`. The authorization server
+metadata advertises all three auth methods for both endpoints. Rotate a secret
+with `AuthStore.rotate_client_secret(client_id)`; the dashboard client list shows
+each client's auth method and grants.
+
 ## Authorization code + PKCE
 
 ```

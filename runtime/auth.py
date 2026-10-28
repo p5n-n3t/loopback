@@ -47,6 +47,9 @@ SCOPES: dict[str, str] = {
 LEGACY_SCOPE = "loopback"
 LEGACY_EXPANSION = {"loopback:read", "loopback:write", "loopback:exec", "loopback:fleet"}
 DEFAULT_CLIENT_SCOPES = ["loopback:read", "loopback:write", "loopback:exec", "loopback:fleet"]
+# One contract for registration, metadata, token and revocation. Public clients stay the default.
+CLIENT_AUTH_METHODS = ["none", "client_secret_basic", "client_secret_post"]
+SUPPORTED_GRANT_TYPES = ["authorization_code", "refresh_token"]
 
 
 class AuthError(Exception):
@@ -342,6 +345,9 @@ class AuthStore:
             pass
         with self._connect() as db:
             db.executescript(SCHEMA)
+            cols = {row[1] for row in db.execute("PRAGMA table_info(oauth_clients)").fetchall()}
+            if "secret_hash" not in cols:
+                db.execute("ALTER TABLE oauth_clients ADD COLUMN secret_hash TEXT")
 
     # ------------------------------------------------------------------ infra
     def _connect(self) -> sqlite3.Connection:
@@ -439,21 +445,55 @@ class AuthStore:
         return out
 
     # -------------------------------------------------------------- clients
+    @staticmethod
+    def _string_list(metadata: dict[str, Any], key: str, default: list[str]) -> list[str]:
+        """Return a metadata array as a list of strings; absent/empty → *default*, malformed → error."""
+        value = metadata.get(key)
+        if value in (None, [], ""):
+            return list(default)
+        if isinstance(value, str):
+            value = value.split()  # tolerate space-separated strings sent by some clients
+        if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+            raise AuthError("invalid_client_metadata", f"{key} must be an array of strings")
+        return value
+
     def register_client(self, metadata: dict[str, Any], *, kind: str = "dcr", client_id: str | None = None) -> dict[str, Any]:
+        """Register (or refresh) a client per RFC 7591.
+
+        Contract, consistent with the metadata document and the token endpoint:
+
+        * ``token_endpoint_auth_method``: ``none`` (public, default when omitted so existing
+          MCP clients keep working), ``client_secret_basic`` or ``client_secret_post``.
+          Confidential methods are only available to DCR clients (``kind == "dcr"``): the
+          server mints the secret, discloses it once in the registration response and stores
+          only its hash. Client ID Metadata Documents cannot receive a secret, so they stay
+          public.
+        * ``grant_types``: narrowed to the supported subset (RFC 7591 §3.2.1 permits the
+          server to substitute requested metadata). ``authorization_code`` must survive the
+          narrowing. ``client_credentials``, ``implicit`` and ``password`` are never enabled.
+        * ``response_types``: must include ``code``; everything else is dropped.
+        """
         redirect_uris = metadata.get("redirect_uris")
         if not isinstance(redirect_uris, list) or not redirect_uris or len(redirect_uris) > 10:
             raise AuthError("invalid_client_metadata", "redirect_uris must list between 1 and 10 URIs")
         for uri in redirect_uris:
             if not isinstance(uri, str) or not redirect_uri_allowed(uri):
                 raise AuthError("invalid_redirect_uri", f"redirect URI not permitted: {uri!r}")
-        auth_method = metadata.get("token_endpoint_auth_method", "none")
-        if auth_method not in {"none"}:
-            raise AuthError("invalid_client_metadata", "only public clients (token_endpoint_auth_method=none) are supported")
-        grant_types = metadata.get("grant_types") or ["authorization_code", "refresh_token"]
-        if any(g not in {"authorization_code", "refresh_token"} for g in grant_types):
-            raise AuthError("invalid_client_metadata", "unsupported grant type requested")
-        response_types = metadata.get("response_types") or ["code"]
-        if any(r != "code" for r in response_types):
+        auth_method = metadata.get("token_endpoint_auth_method") or "none"
+        if auth_method not in CLIENT_AUTH_METHODS:
+            raise AuthError("invalid_client_metadata",
+                            "token_endpoint_auth_method must be one of: " + ", ".join(CLIENT_AUTH_METHODS))
+        if auth_method != "none" and kind != "dcr":
+            raise AuthError("invalid_client_metadata",
+                            "client ID metadata documents describe public clients; use token_endpoint_auth_method=none")
+        requested_grants = self._string_list(metadata, "grant_types", ["authorization_code", "refresh_token"])
+        grant_types = [g for g in requested_grants if g in SUPPORTED_GRANT_TYPES]
+        if "authorization_code" not in grant_types:
+            raise AuthError("invalid_client_metadata",
+                            "unsupported grant type requested: the authorization_code grant is required "
+                            f"(supported: {', '.join(SUPPORTED_GRANT_TYPES)})")
+        requested_responses = self._string_list(metadata, "response_types", ["code"])
+        if "code" not in requested_responses:
             raise AuthError("invalid_client_metadata", "only response_type=code is supported")
         name = str(metadata.get("client_name") or "MCP client")[:200]
         cid = client_id or secrets.token_urlsafe(18)
@@ -461,21 +501,28 @@ class AuthStore:
             "client_id": cid,
             "client_name": name,
             "redirect_uris": redirect_uris,
-            "token_endpoint_auth_method": "none",
-            "grant_types": ["authorization_code", "refresh_token"],
+            "token_endpoint_auth_method": auth_method,
+            "grant_types": grant_types,
             "response_types": ["code"],
             "client_id_issued_at": int(time.time()),
         }
         for key in ("client_uri", "logo_uri", "software_id", "software_version"):
             if isinstance(metadata.get(key), str):
                 record[key] = metadata[key][:500]
+        secret = secrets.token_urlsafe(32) if auth_method != "none" else None
         with self._lock, self._connect() as db:
             db.execute(
-                "INSERT OR REPLACE INTO oauth_clients(client_id,client_name,redirect_uris,kind,metadata,created_at,last_used_at,revoked_at)"
-                " VALUES(?,?,?,?,?,?,NULL,NULL)",
-                (cid, name, json.dumps(redirect_uris), kind, json.dumps(record), time.time()),
+                "INSERT OR REPLACE INTO oauth_clients(client_id,client_name,redirect_uris,kind,metadata,created_at,last_used_at,revoked_at,secret_hash)"
+                " VALUES(?,?,?,?,?,?,NULL,NULL,?)",
+                (cid, name, json.dumps(redirect_uris), kind, json.dumps(record), time.time(),
+                 sha256_hex(secret) if secret else None),
             )
-        self.record_event("client_registered", cid, detail={"kind": kind, "name": name})
+        self.record_event("client_registered", cid, detail={"kind": kind, "name": name, "auth_method": auth_method,
+                                                            "grant_types": grant_types,
+                                                            "narrowed": sorted(set(requested_grants) - set(grant_types))})
+        if secret:
+            # One-time disclosure (RFC 7591 §3.2.1). The hash is the only copy Loopback keeps.
+            return {**record, "client_secret": secret, "client_secret_expires_at": 0}
         return record
 
     def get_client(self, client_id: str) -> dict[str, Any] | None:
@@ -485,7 +532,36 @@ class AuthStore:
             return None
         item = dict(row)
         item["redirect_uris"] = json.loads(item["redirect_uris"])
+        try:
+            meta = json.loads(item.get("metadata") or "{}")
+        except json.JSONDecodeError:
+            meta = {}
+        item["token_endpoint_auth_method"] = meta.get("token_endpoint_auth_method") or "none"
+        item["grant_types"] = meta.get("grant_types") or ["authorization_code", "refresh_token"]
+        item["confidential"] = item["token_endpoint_auth_method"] != "none" and bool(item.get("secret_hash"))
+        item.pop("secret_hash", None)
         return item
+
+    def verify_client_secret(self, client_id: str, secret: str) -> bool:
+        """Constant-time check of a confidential client's secret. Public clients always fail."""
+        with self._connect() as db:
+            row = db.execute("SELECT secret_hash FROM oauth_clients WHERE client_id=? AND revoked_at IS NULL", (client_id,)).fetchone()
+        if not row or not row["secret_hash"] or not secret:
+            # Burn the same hashing cost so timing does not reveal whether the client exists.
+            hmac.compare_digest(sha256_hex(secret or ""), sha256_hex("x"))
+            return False
+        return hmac.compare_digest(row["secret_hash"], sha256_hex(secret))
+
+    def rotate_client_secret(self, client_id: str) -> str:
+        """Mint a new secret for a confidential client; returns it once."""
+        client = self.get_client(client_id)
+        if not client or client["token_endpoint_auth_method"] == "none":
+            raise AuthError("invalid_client", "client is not a confidential client", 404)
+        secret = secrets.token_urlsafe(32)
+        with self._lock, self._connect() as db:
+            db.execute("UPDATE oauth_clients SET secret_hash=? WHERE client_id=?", (sha256_hex(secret), client_id))
+        self.record_event("client_secret_rotated", client_id)
+        return secret
 
     def touch_client(self, client_id: str) -> None:
         with self._lock, self._connect() as db:
@@ -501,6 +577,12 @@ class AuthStore:
         for row in rows:
             item = {k: row[k] for k in ("client_id", "client_name", "kind", "created_at", "last_used_at", "revoked_at")}
             item["redirect_uris"] = json.loads(row["redirect_uris"])
+            try:
+                meta = json.loads(row["metadata"] or "{}")
+            except json.JSONDecodeError:
+                meta = {}
+            item["token_endpoint_auth_method"] = meta.get("token_endpoint_auth_method") or "none"
+            item["grant_types"] = meta.get("grant_types") or list(SUPPORTED_GRANT_TYPES)
             item["active_grants"] = counts.get(row["client_id"], 0)
             out.append(item)
         return out

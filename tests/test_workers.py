@@ -291,3 +291,47 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(tool_text(call_tool(client, headers, 'echo', {'message': 'remote-only'})), 'remote-only')
             self.assertEqual(client.get('/.well-known/oauth-protected-resource/mcp').status_code, 200)
             self.assertGreater(node_agent.read_json(root / 'traffic.json')['tx_bytes'], 0)
+
+
+class HostMetricsTests(unittest.TestCase):
+    def test_host_network_excludes_stacked_virtual_adapters(self):
+        text = '''Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 1000 10 0 0 0 0 0 0 1000 10 0 0 0 0 0 0
+  eth0: 5000 50 0 0 0 0 0 0 7000 70 0 0 0 0 0 0
+tailscale0: 4000 40 0 0 0 0 0 0 6000 60 0 0 0 0 0 0
+docker0: 300 3 0 0 0 0 0 0 400 4 0 0 0 0 0 0
+ wlan0: 100 1 0 0 0 0 0 0 200 2 0 0 0 0 0 0
+'''
+        rx, tx, counted, excluded = node_agent.host_network(text)
+        self.assertEqual((rx, tx), (5100, 7200))
+        self.assertEqual(counted, ['eth0', 'wlan0'])
+        self.assertEqual(excluded, ['lo', 'tailscale0', 'docker0'])
+
+    def test_sample_states_distinguish_first_measured_and_unavailable(self):
+        root = Path(tempfile.mkdtemp())
+        manager = WorkerManager(SimpleNamespace(cfg_dir=root, ssh=SimpleNamespace(get=lambda name: {'name': name})))
+        base = {'cpu_count': 2, 'cpu_seconds': 100, 'cpu_idle_seconds': 80, 'memory_total': 1000, 'memory_used': 500,
+                'rx_bytes': 100, 'tx_bytes': 100, 'net_interfaces': ['eth0'], 'net_excluded': ['lo', 'tailscale0']}
+        manager.call = lambda *a, **kw: {'sampled_at': 10, 'host': dict(base), 'worker': {'cpu_seconds': 2, 'rss_bytes': 1, 'rx_bytes': 0, 'tx_bytes': 0, 'process_count': 1}, 'bindings': []}
+        first = manager._sample('local')
+        self.assertEqual(first['rates'], {'state': 'first', 'interval_seconds': None})
+        self.assertIsNone(first['host']['rx_per_second'])
+        self.assertEqual(first['host']['memory_available'], 500)
+        # Second sample with unchanged counters is a *measured* zero, not an unknown.
+        manager.call = lambda *a, **kw: {'sampled_at': 12, 'host': {**base, 'cpu_seconds': 104, 'cpu_idle_seconds': 84},
+                                         'worker': {'cpu_seconds': 2, 'rss_bytes': 1, 'rx_bytes': 0, 'tx_bytes': 0, 'process_count': 1}, 'bindings': []}
+        second = manager._sample('local')
+        self.assertEqual(second['rates']['state'], 'measured')
+        self.assertEqual(second['rates']['interval_seconds'], 2.0)
+        self.assertEqual(second['host']['rx_per_second'], 0)
+        self.assertEqual(second['host']['cpu_percent'], 0)
+        self.assertEqual(second['worker']['cpu_percent'], 0)
+        # Tiny Loopback memory keeps two decimals instead of collapsing to zero.
+        self.assertEqual(second['worker']['memory_percent'], 0.1)
+        # Missing host counters are reported as unavailable, never as zero.
+        manager.call = lambda *a, **kw: {'sampled_at': 14, 'host': {**base, 'cpu_seconds': None, 'cpu_idle_seconds': None},
+                                         'worker': {'cpu_seconds': 2, 'rss_bytes': 1, 'rx_bytes': 0, 'tx_bytes': 0, 'process_count': 1}, 'bindings': []}
+        third = manager._sample('local')
+        self.assertEqual(third['rates']['state'], 'unavailable')
+        self.assertIsNone(third['host']['cpu_percent'])

@@ -7,6 +7,7 @@ directly (never redirected) per OAuth 2.1 §4.1.2.1.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import html
 import ipaddress
@@ -21,8 +22,10 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from starlette.routing import Route
 
 from auth import (
+    CLIENT_AUTH_METHODS,
     DEFAULT_CLIENT_SCOPES,
     SCOPES,
+    SUPPORTED_GRANT_TYPES,
     AuthError,
     b64url,
     normalize_scopes,
@@ -107,17 +110,36 @@ def oauth_error(error: str, description: str = "", status: int = 400) -> JSONRes
 
 # --------------------------------------------------------------------------- HTML
 _STYLE = """
-:root{--bg:#0b0e12;--panel:#12171d;--line:#263038;--text:#f2f5f7;--muted:#8d9ba8;--accent:#ffd54a;--accent-ink:#141414;--cyan:#6ee7ff;--red:#ff7b7b;--ok:#7cf0a9}
-@media(prefers-color-scheme:light){:root{--bg:#f3f5f7;--panel:#ffffff;--line:#d7dde3;--text:#15202b;--muted:#5b6b7a;--accent:#d9a400;--accent-ink:#fff}}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px}
-.card{width:min(520px,100%);background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px;box-shadow:0 20px 60px #0005}
-.brand{color:var(--accent);letter-spacing:.16em;font-size:12px;font-weight:700}h1{font-size:22px;margin:12px 0 6px}p{color:var(--muted);margin:6px 0 14px}
-label{display:block;font-size:13px;margin:12px 0 6px}input{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--text);font:inherit}
-input:focus{outline:2px solid var(--accent);outline-offset:1px}button{width:100%;margin-top:16px;padding:12px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);font:700 14px inherit;cursor:pointer}
-.err{padding:10px 12px;border:1px solid #7a3030;background:#3a1a1a40;border-radius:9px;color:var(--red);margin:12px 0}.meta{display:grid;grid-template-columns:110px 1fr;gap:6px 12px;padding:12px;border:1px solid var(--line);border-radius:10px;font-size:13px;margin:14px 0}
-.meta b{color:var(--cyan);font-weight:600}ul.scopes{margin:0;padding:0 0 0 18px;font-size:13px;color:var(--muted)}ul.scopes code{color:var(--text)}
-.small{font-size:12px;color:var(--muted);margin-top:16px}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+:root{--bg:#ffffff;--bg2:#fafafa;--panel:#ffffff;--line:#e6e6e6;--text:#171717;--muted:#6e6e6e;--accent:#171717;--accent-ink:#ffffff;--bad:#c93f45;--bad-soft:#fdf2f4;--ok:#19804a;--info:#356cda;--brand-soft:#fff5ec;--grad:linear-gradient(135deg,#FFF0A8 0%,#FFB249 33%,#FF6B68 67%,#EA55B9 100%);--sans:Inter,"Inter Variable",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+@media(prefers-color-scheme:dark){:root{--bg:#141414;--bg2:#191919;--panel:#191919;--line:#2b2b2b;--text:#eeeeee;--muted:#ababab;--accent:#eeeeee;--accent-ink:#171717;--bad:#ef9294;--bad-soft:#332125;--ok:#75d399;--info:#a5bcff;--brand-soft:#2a211c}}
+*{box-sizing:border-box}html{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);padding:24px;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:auto -20vw -30vh auto;width:60vw;height:60vh;background:var(--grad);opacity:.08;filter:blur(80px);pointer-events:none}
+.card{position:relative;width:min(440px,100%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:32px 28px 26px;box-shadow:0 20px 60px #0000000f}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;letter-spacing:0;font-size:12px;font-weight:600;color:var(--muted)}
+.brand img{display:block}.brand .symbol{width:36px;height:36px}.brand .wordmark{height:18px;width:auto}.brand .ctx{margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+h1{font-size:22px;letter-spacing:-.5px;margin:0 0 6px;font-weight:700}h1::after{content:"";display:block;width:28px;height:3px;border-radius:3px;background:var(--grad);margin-top:8px}
+p{color:var(--muted);margin:6px 0 14px}
+label{display:block;font-size:12px;font-weight:600;margin:14px 0 6px;color:var(--muted)}input{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit}
+input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--brand-soft)}
+button{width:100%;margin-top:18px;padding:12px 18px;border:1px solid var(--accent);border-radius:999px;background:var(--accent);color:var(--accent-ink);font:600 14px/1 var(--sans);cursor:pointer;transition:filter .12s}
+button:hover{filter:brightness(1.12)}button:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px #FF6B68}
+button.secondary{background:transparent;color:var(--muted);border-color:var(--line);margin-top:10px}
+.err{padding:10px 12px;border:1px solid var(--bad);background:var(--bad-soft);border-radius:10px;color:var(--bad);margin:12px 0;font-weight:500}
+.meta{display:grid;grid-template-columns:96px 1fr;gap:6px 12px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;font-size:13px;margin:14px 0;background:var(--bg2)}
+.meta b{color:var(--muted);font-weight:600}.meta span{overflow-wrap:anywhere}ul.scopes{margin:0;padding:0 0 0 18px;font-size:13px;color:var(--muted)}ul.scopes code{color:var(--text)}
+.small{font-size:12px;color:var(--muted);margin-top:18px;overflow-wrap:anywhere}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px}a{color:var(--info)}
+@media(max-width:480px){body{padding:12px;align-items:start}.card{padding:24px 18px 20px;border-radius:16px}.brand .ctx{display:none}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
 """
+
+BRAND_SYMBOL = "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/NkkqcpcALQ_FMecD2aRwM.png"
+BRAND_WORDMARK = "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/mZnvkqIch_h_x3M0nEWyl.png"
+
+
+def _brand(context: str = "") -> str:
+    ctx = f'<span class="ctx">{html.escape(context)}</span>' if context else ""
+    return (f'<div class="brand" data-testid="brand"><img class="symbol" src="{BRAND_SYMBOL}" alt="" width="36" height="36">'
+            f'<img class="wordmark" src="{BRAND_WORDMARK}" alt="Loopback" height="18">{ctx}</div>')
 
 
 def _page(title: str, body: str) -> str:
@@ -126,7 +148,7 @@ def _page(title: str, body: str) -> str:
 
 
 def render_worker_connection(name: str, endpoint: str) -> str:
-    return _page("Loopback · Service connection", f"""<div class="brand">LOOPBACK</div>
+    return _page("Loopback · Service connection", f"""{_brand("Service")}
 <h1>Service access is ready</h1><p>Connect to <b>{html.escape(name)}</b> from your MCP client.</p>
 <label for="mcp-url">MCP URL</label><input id="mcp-url" value="{html.escape(endpoint, quote=True)}" readonly>
 <p class="small">Add this URL to your MCP client and choose OAuth. Authorize with this service's password.</p>
@@ -138,15 +160,15 @@ def render_login(host: str, error: str = "", next_path: str = "/admin", password
     err = f'<div class="err">{html.escape(error)}</div>' if error else ""
     hint = ("Sign in with your dashboard password." if password_set
             else "No dashboard password is set yet. Run <code>loopback auth enroll</code> on this machine to open the one-time setup link, or sign in with the machine token for recovery.")
-    return _page("Loopback · Sign in", f"""<div class="brand">LOOPBACK</div><h1>Sign in</h1><p>{hint}</p>{err}
+    return _page("Loopback · Sign in", f"""{_brand("Dashboard")}<h1>Sign in</h1><p>{hint}</p>{err}
 <form method="post" action="/admin/login" autocomplete="off"><input type="hidden" name="next" value="{html.escape(next_path, quote=True)}">
 <label for="credential">Password or machine token</label><input id="credential" type="password" name="credential" autocomplete="current-password" autofocus required>
-<button>Open dashboard</button></form><div class="small">Host: {html.escape(host)}</div>""")
+<button>Open dashboard</button></form><div class="small">Dashboard address: <code>{html.escape(host)}</code></div>""")
 
 
 def render_enroll(error: str = "") -> str:
     err = f'<div class="err">{html.escape(error)}</div>' if error else ""
-    return _page("Loopback · First-run setup", f"""<div class="brand">LOOPBACK</div><h1>Create the dashboard password</h1>
+    return _page("Loopback · First-run setup", f"""{_brand("Setup")}<h1>Create the dashboard password</h1>
 <p>This one-time link came from <code>loopback auth enroll</code>. Choose a password (10+ characters). The machine token remains a local recovery credential.</p>{err}
 <form method="post" action="/admin/enroll" id="f" autocomplete="off"><input type="hidden" name="code" id="code">
 <label for="p1">New password</label><input id="p1" type="password" name="password" minlength="10" autocomplete="new-password" required autofocus>
@@ -161,16 +183,16 @@ def render_consent(*, client_name: str, redirect_uri: str, scopes: list[str], ho
     scope_items = "".join(f"<li><code>{html.escape(s)}</code> — {html.escape(SCOPES.get(s, ''))}</li>" for s in scopes)
     cred = ("" if not need_credential else
             '<label for="credential">Dashboard password or machine token</label><input id="credential" type="password" name="credential" autocomplete="current-password" required>')
-    return _page("Loopback · Authorize", f"""<div class="brand">LOOPBACK · AUTHORIZATION</div><h1>Authorize {html.escape(client_name)}</h1>
+    return _page("Loopback · Authorize", f"""{_brand("Authorization")}<h1>Authorize {html.escape(client_name)}</h1>
 <p>The client will receive a short-lived OAuth credential scoped to this Loopback instance. Your password and machine token are never shared with it.</p>{err}
 <div class="meta"><b>Client</b><span>{html.escape(client_name)}</span><b>Redirect</b><span>{html.escape(redirect_uri)}</span><b>Resource</b><span>{html.escape(host)}</span></div>
 <ul class="scopes">{scope_items}</ul>
 <form method="post" action="/oauth/authorize" autocomplete="off"><input type="hidden" name="request_id" value="{html.escape(request_id, quote=True)}"><input type="hidden" name="csrf" value="{html.escape(csrf, quote=True)}">{cred}
-<button name="decision" value="approve">Approve</button><button name="decision" value="deny" style="background:transparent;color:var(--muted);border:1px solid var(--line)">Deny</button></form>""")
+<button name="decision" value="approve">Approve</button><button name="decision" value="deny" class="secondary">Deny</button></form>""")
 
 
 def render_message(title: str, text: str) -> str:
-    return _page(f"Loopback · {title}", f'<div class="brand">LOOPBACK</div><h1>{html.escape(title)}</h1><p>{html.escape(text)}</p>')
+    return _page(f"Loopback · {title}", f'{_brand()}<h1>{html.escape(title)}</h1><p>{html.escape(text)}</p>')
 
 
 # --------------------------------------------------------------------------- metadata
@@ -194,10 +216,10 @@ def _as_metadata(ctx: AppContext, base: str) -> dict[str, Any]:
         "revocation_endpoint": f"{base}/oauth/revoke",
         "response_types_supported": ["code"],
         "response_modes_supported": ["query"],
-        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "grant_types_supported": list(SUPPORTED_GRANT_TYPES),
         "code_challenge_methods_supported": ["S256"],
-        "token_endpoint_auth_methods_supported": ["none"],
-        "revocation_endpoint_auth_methods_supported": ["none"],
+        "token_endpoint_auth_methods_supported": list(CLIENT_AUTH_METHODS),
+        "revocation_endpoint_auth_methods_supported": list(CLIENT_AUTH_METHODS),
         "scopes_supported": list(SCOPES),
         "authorization_response_iss_parameter_supported": True,
         "client_id_metadata_document_supported": bool(auth_cfg.get("allow_client_id_metadata_documents", True)),
@@ -245,6 +267,74 @@ async def _resolve_client(ctx: AppContext, client_id: str) -> dict[str, Any] | N
         record = ctx.auth.register_client(doc, kind="cimd", client_id=client_id)
         return ctx.auth.get_client(record["client_id"])
     return None
+
+
+# --------------------------------------------------------------------------- client authentication
+def _basic_credentials(request: Request) -> tuple[str, str] | None:
+    """Decode an HTTP Basic ``client_id:client_secret`` header (RFC 6749 §2.3.1, form-urlencoded parts)."""
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("basic "):
+        return None
+    try:
+        raw = base64.b64decode(header[6:].strip() + "=" * (-len(header[6:].strip()) % 4)).decode("utf-8")
+        cid, _, secret = raw.partition(":")
+        return urllib.parse.unquote(cid), urllib.parse.unquote(secret)
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+
+class ClientAuthFailure(Exception):
+    def __init__(self, description: str, *, method: str):
+        super().__init__(description)
+        self.description = description
+        self.method = method
+
+
+def authenticate_client(ctx: AppContext, request: Request, form: Any) -> dict[str, Any]:
+    """Resolve and authenticate the client for the token and revocation endpoints.
+
+    The registered ``token_endpoint_auth_method`` decides what is required:
+    ``none`` → the ``client_id`` form field identifies a public client (a stray secret is
+    ignored); ``client_secret_basic`` → the Basic header must carry the secret;
+    ``client_secret_post`` → the ``client_secret`` form field must carry it. The secret is
+    checked in constant time before any code or refresh token is consumed, so a failed
+    attempt never burns a grant. Raises ``ClientAuthFailure`` (→ 401 ``invalid_client``).
+    """
+    basic = _basic_credentials(request)
+    form_id = str(form.get("client_id") or "")
+    form_secret = str(form.get("client_secret") or "")
+    client_id = basic[0] if basic and basic[0] else form_id
+    if basic and form_id and form_id != basic[0]:
+        raise ClientAuthFailure("client_id in the Basic header and the form differ", method="client_secret_basic")
+    if not client_id:
+        raise ClientAuthFailure("client_id is required", method="none")
+    client = ctx.auth.get_client(client_id)
+    if not client:
+        raise ClientAuthFailure("unknown client", method="none")
+    method = client.get("token_endpoint_auth_method") or "none"
+    if method == "none":
+        return client
+    if method == "client_secret_basic":
+        if not basic:
+            raise ClientAuthFailure("this client is registered for client_secret_basic; send HTTP Basic credentials", method=method)
+        secret = basic[1]
+    else:  # client_secret_post
+        if basic:
+            raise ClientAuthFailure("this client is registered for client_secret_post; send client_secret in the body", method=method)
+        secret = form_secret
+    if not ctx.auth.verify_client_secret(client_id, secret):
+        raise ClientAuthFailure("client authentication failed", method=method)
+    return client
+
+
+def _client_auth_error(ctx: AppContext, request: Request, failure: ClientAuthFailure) -> Response:
+    ctx.auth.limiter.failure("token", client_ip(request), threshold=30)
+    ctx.auth.record_event("client_auth_failed", str(_basic_credentials(request) and _basic_credentials(request)[0] or "") or None,
+                          client_ip(request), {"method": failure.method})
+    headers = dict(NO_STORE)
+    if failure.method == "client_secret_basic":
+        headers["WWW-Authenticate"] = 'Basic realm="loopback"'
+    return JSONResponse({"error": "invalid_client", "error_description": failure.description}, status_code=401, headers=headers)
 
 
 # --------------------------------------------------------------------------- handlers
@@ -369,12 +459,13 @@ def routes(ctx: AppContext) -> list[Route]:
             return oauth_error("invalid_request", "rate limited", 429)
         form = await request.form()
         grant_type = str(form.get("grant_type") or "")
-        client_id = str(form.get("client_id") or "")
-        if not client_id:
-            return oauth_error("invalid_client", "client_id is required", 401)
-        client = ctx.auth.get_client(client_id)
-        if not client:
-            return oauth_error("invalid_client", "unknown client", 401)
+        try:
+            client = authenticate_client(ctx, request, form)
+        except ClientAuthFailure as failure:
+            return _client_auth_error(ctx, request, failure)
+        client_id = client["client_id"]
+        if grant_type in SUPPORTED_GRANT_TYPES and grant_type not in (client.get("grant_types") or SUPPORTED_GRANT_TYPES):
+            return oauth_error("unauthorized_client", f"this client was not registered for the {grant_type} grant")
         try:
             resource = ctx.auth.canonical_resource(str(form.get("resource") or "") or None)
         except AuthError as exc:
@@ -434,9 +525,18 @@ def routes(ctx: AppContext) -> list[Route]:
         form = await request.form()
         value = str(form.get("token") or "")
         hint = str(form.get("token_type_hint") or "") or None
+        # RFC 7009 §2.1: confidential clients authenticate; public clients only identify themselves.
+        if _basic_credentials(request) or form.get("client_id"):
+            try:
+                client = authenticate_client(ctx, request, form)
+            except ClientAuthFailure as failure:
+                return _client_auth_error(ctx, request, failure)
+            who = client["client_id"]
+        else:
+            who = "client"
         if value:
             ctx.auth.revoke_token(value, hint)
-            ctx.auth.record_event("token_revoked", str(form.get("client_id") or "client"), client_ip(request))
+            ctx.auth.record_event("token_revoked", who, client_ip(request))
         return Response(status_code=200, headers=NO_STORE)
 
     # ---------------------------------------------------------------- dashboard auth
