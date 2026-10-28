@@ -158,10 +158,11 @@ def render_worker_connection(name: str, endpoint: str) -> str:
 
 def render_login(host: str, error: str = "", next_path: str = "/admin", password_set: bool = True) -> str:
     err = f'<div class="err">{html.escape(error)}</div>' if error else ""
-    hint = ("Sign in with your dashboard password." if password_set
+    hint = ("Sign in with your dashboard username and password. Older installations can leave the username empty until they set one. Use the machine token for recovery." if password_set
             else "No dashboard password is set yet. Run <code>loopback auth enroll</code> on this machine to open the one-time setup link, or sign in with the machine token for recovery.")
     return _page("Loopback · Sign in", f"""{_brand("Dashboard")}<h1>Sign in</h1><p>{hint}</p>{err}
 <form method="post" action="/admin/login" autocomplete="off"><input type="hidden" name="next" value="{html.escape(next_path, quote=True)}">
+<label for="username">Dashboard username</label><input id="username" name="username" autocomplete="username">
 <label for="credential">Password or machine token</label><input id="credential" type="password" name="credential" autocomplete="current-password" autofocus required>
 <button>Open dashboard</button></form><div class="small">Dashboard address: <code>{html.escape(host)}</code></div>""")
 
@@ -182,9 +183,9 @@ def render_consent(*, client_name: str, redirect_uri: str, scopes: list[str], ho
     err = f'<div class="err">{html.escape(error)}</div>' if error else ""
     scope_items = "".join(f"<li><code>{html.escape(s)}</code> — {html.escape(SCOPES.get(s, ''))}</li>" for s in scopes)
     cred = ("" if not need_credential else
-            '<label for="credential">Dashboard password or machine token</label><input id="credential" type="password" name="credential" autocomplete="current-password" required>')
+            '<label for="username">Dashboard username (for password sign-in)</label><input id="username" name="username" autocomplete="username"><label for="credential">Connector setup key, dashboard password, or machine token</label><input id="credential" type="password" name="credential" autocomplete="current-password" required>')
     return _page("Loopback · Authorize", f"""{_brand("Authorization")}<h1>Authorize {html.escape(client_name)}</h1>
-<p>The client will receive a short-lived OAuth credential scoped to this Loopback instance. Your password and machine token are never shared with it.</p>{err}
+<p>The client will receive a short-lived OAuth credential scoped to this Loopback instance. Your setup key, password, and machine token are never shared with it. Reuse the connector setup key here to authorize additional clients. Review the redirect and scopes before you approve.</p>{err}
 <div class="meta"><b>Client</b><span>{html.escape(client_name)}</span><b>Redirect</b><span>{html.escape(redirect_uri)}</span><b>Resource</b><span>{html.escape(host)}</span></div>
 <ul class="scopes">{scope_items}</ul>
 <form method="post" action="/oauth/authorize" autocomplete="off"><input type="hidden" name="request_id" value="{html.escape(request_id, quote=True)}"><input type="hidden" name="csrf" value="{html.escape(csrf, quote=True)}">{cred}
@@ -438,7 +439,8 @@ def routes(ctx: AppContext) -> list[Route]:
         credential = str(form.get("credential") or "")
         need_cred = session is None or bool(ctx.config.data.get("auth", {}).get("require_password_for_consent", True))
         if need_cred:
-            method = ctx.auth.verify_admin_credential(credential)
+            method = ("connector-key" if ctx.auth.verify_connector_key(credential) else
+                      ctx.auth.verify_dashboard_login(str(form.get("username") or ""), credential))
             if not method:
                 locked = ctx.auth.limiter.failure("login", ip)
                 ctx.auth.record_event("oauth_consent_bad_credential", params["client_id"], ip, {"locked": locked})
@@ -446,7 +448,7 @@ def routes(ctx: AppContext) -> list[Route]:
                 rid2, csrf2 = ctx.auth.stash_authz_request(params)
                 return HTMLResponse(render_consent(client_name=client["client_name"], redirect_uri=redirect_uri, scopes=params["scope"].split(),
                                                    host=params["resource"], request_id=rid2, csrf=csrf2, need_credential=True,
-                                                   error="Invalid password or machine token."), status_code=401, headers=NO_STORE)
+                                                   error="Invalid credentials or connector setup key."), status_code=401, headers=NO_STORE)
             ctx.auth.limiter.success("login", ip)
         code = ctx.auth.create_code(client_id=params["client_id"], redirect_uri=redirect_uri, code_challenge=params["code_challenge"],
                                     resource=params["resource"], scope=params["scope"])
@@ -557,7 +559,7 @@ def routes(ctx: AppContext) -> list[Route]:
             return HTMLResponse(render_login(host, "Too many failed attempts. Try again in 15 minutes.", password_set=ctx.auth.has_password()), status_code=429, headers=NO_STORE)
         form = await request.form()
         credential = str(form.get("credential") or form.get("token") or "")
-        method = ctx.auth.verify_admin_credential(credential)
+        method = ctx.auth.verify_dashboard_login(str(form.get("username") or ""), credential)
         if not method:
             locked = ctx.auth.limiter.failure("login", ip)
             ctx.auth.record_event("login_failed", None, ip, {"locked": locked})

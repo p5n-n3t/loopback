@@ -458,6 +458,27 @@ def routes(ctx: AppContext) -> list[Route]:
         ctx.audit.record("auth.password_change", "ok", target="dashboard")
         return ok({"password_set": True})
 
+    async def dashboard_account(request: Request) -> Response:
+        body = await read_json(request)
+        if not ctx.auth.verify_admin_credential(str(body.get("current") or "")):
+            return bad_request("current credential is incorrect", status=403)
+        try:
+            ctx.auth.set_dashboard_account(str(body.get("username") or ""), str(body.get("password") or ""))
+        except AuthError as exc:
+            return bad_request(exc.description)
+        response = ok({"changed": True, "sessions_revoked": True})
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return response
+
+    async def connector_rotate(request: Request) -> Response:
+        body = await read_json(request)
+        if not ctx.auth.verify_admin_credential(str(body.get("current") or "")):
+            return bad_request("current credential is incorrect", status=403)
+        value = ctx.auth.rotate_connector_key()
+        ctx.audit.record("auth.connector_key_rotate", "ok", target="dashboard")
+        return ok({"key": value, "grants_revoked": False,
+                   "note": "Existing OAuth grants and API tokens remain valid. Revoke each grant or client separately to remove access."})
+
     async def legacy_toggle(request: Request) -> Response:
         body = await read_json(request)
         enabled = bool(body.get("enabled", False))
@@ -548,6 +569,8 @@ def routes(ctx: AppContext) -> list[Route]:
         Route("/api/admin/auth/clients/{client_id:path}", client_delete, methods=["DELETE"]),
         Route("/api/admin/auth/grants/{family_id}", grant_delete, methods=["DELETE"]),
         Route("/api/admin/auth/password", password, methods=["POST"]),
+        Route("/api/admin/auth/account", dashboard_account, methods=["POST"]),
+        Route("/api/admin/auth/connector-key", connector_rotate, methods=["POST"]),
         Route("/api/admin/auth/legacy-token", legacy_toggle, methods=["POST"]),
         Route("/api/admin/auth/rotate-machine-token", rotate_machine, methods=["POST"]),
         Route("/api/admin/auth/rotate-signing-key", rotate_signing, methods=["POST"]),

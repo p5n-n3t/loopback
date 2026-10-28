@@ -316,6 +316,16 @@ def routes(ctx: Any) -> list[Route]:
         return JSONResponse(result)
 
     @_handler
+    async def ingress_ngrok(request: Request) -> JSONResponse:
+        ing = _require(getattr(ctx, "ingress", None), "ingress")
+        body = await _body(request)
+        result = await asyncio.to_thread(ing.apply_ngrok, _bool(body, "enabled", True),
+                                         _opt_str(body, "hostname", 253), _opt_str(body, "config_file", 4096),
+                                         _bool(body, "confirm_public", False))
+        _audit(ctx, "ingress.ngrok", "ngrok", detail={"enabled": _bool(body, "enabled", True)})
+        return JSONResponse(result)
+
+    @_handler
     async def ingress_tailscale(request: Request) -> JSONResponse:
         ing = _require(getattr(ctx, "ingress", None), "ingress")
         body = await _body(request)
@@ -339,7 +349,7 @@ def routes(ctx: Any) -> list[Route]:
     async def ingress_restart(request: Request) -> JSONResponse:
         ing = _require(getattr(ctx, "ingress", None), "ingress")
         name = request.path_params["name"]
-        if name not in ("cloudflare", "tailscale"):
+        if name not in ("cloudflare", "tailscale", "ngrok"):
             raise _HTTPError(404, f"unknown ingress: {name}")
         try:
             result = await asyncio.to_thread(ing.restart, name)
@@ -353,7 +363,7 @@ def routes(ctx: Any) -> list[Route]:
     async def ingress_diagnostics(request: Request) -> JSONResponse:
         ing = _require(getattr(ctx, "ingress", None), "ingress")
         name = request.path_params["name"]
-        if name not in ("cloudflare", "tailscale"):
+        if name not in ("cloudflare", "tailscale", "ngrok"):
             raise _HTTPError(404, f"unknown ingress: {name}")
         return JSONResponse(await asyncio.to_thread(ing.diagnostics, name))
 
@@ -404,6 +414,7 @@ def routes(ctx: Any) -> list[Route]:
         Route("/api/admin/topology/refresh", topology_refresh, methods=["POST"]),
         Route("/api/admin/topology/nodes/{id}", topology_rename, methods=["PUT"]),
         Route("/api/admin/ingress", ingress_get, methods=["GET"]),
+        Route("/api/admin/ingress/ngrok", ingress_ngrok, methods=["PUT"]),
         Route("/api/admin/ingress/cloudflare", ingress_cloudflare, methods=["PUT"]),
         Route("/api/admin/ingress/tailscale", ingress_tailscale, methods=["PUT"]),
         Route("/api/admin/ingress/{name}/restart", ingress_restart, methods=["POST"]),

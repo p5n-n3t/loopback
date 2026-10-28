@@ -300,6 +300,11 @@ CREATE TABLE IF NOT EXISTS admin_credential (
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS connector_key (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    key_hash TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS enrollment_codes (
     code_hash TEXT PRIMARY KEY,
     created_at REAL NOT NULL,
@@ -348,6 +353,11 @@ class AuthStore:
             cols = {row[1] for row in db.execute("PRAGMA table_info(oauth_clients)").fetchall()}
             if "secret_hash" not in cols:
                 db.execute("ALTER TABLE oauth_clients ADD COLUMN secret_hash TEXT")
+
+        with self._connect() as db:
+            cols = {row[1] for row in db.execute("PRAGMA table_info(admin_credential)")}
+            if "username" not in cols:
+                db.execute("ALTER TABLE admin_credential ADD COLUMN username TEXT")
 
     # ------------------------------------------------------------------ infra
     def _connect(self) -> sqlite3.Connection:
@@ -841,6 +851,67 @@ class AuthStore:
         with self._connect() as db:
             return db.execute("SELECT 1 FROM admin_credential WHERE id=1").fetchone() is not None
 
+    def dashboard_username(self) -> str | None:
+        with self._connect() as db:
+            row = db.execute("SELECT username FROM admin_credential WHERE id=1").fetchone()
+        return row["username"] if row else None
+
+    def ensure_dashboard_account(self) -> dict[str, str] | None:
+        """Generate first-install credentials once. Never replace an existing password."""
+        with self._lock:
+            if self.has_password():
+                return None
+            username = "loopback-" + secrets.token_hex(4)
+            password = secrets.token_urlsafe(24)
+            self.set_dashboard_account(username, password)
+            return {"username": username, "password": password}
+
+    def set_dashboard_account(self, username: str, password: str) -> None:
+        username = username.strip()
+        if not username or len(username) > 80 or any(c.isspace() or ord(c) < 32 for c in username):
+            raise AuthError("invalid_request", "username must contain 1 to 80 characters without spaces")
+        if len(password) < 10:
+            raise AuthError("invalid_request", "password must be at least 10 characters")
+        with self._lock, self._connect() as db:
+            now = time.time()
+            db.execute("INSERT INTO admin_credential(id,password_hash,created_at,updated_at,username) VALUES(1,?,?,?,?)"
+                       " ON CONFLICT(id) DO UPDATE SET password_hash=excluded.password_hash,username=excluded.username,updated_at=excluded.updated_at",
+                       (hash_password(password), now, now, username))
+            db.execute("DELETE FROM admin_sessions")
+        self.record_event("admin_account_changed", "admin")
+
+    def verify_dashboard_login(self, username: str, supplied: str) -> str | None:
+        method = self.verify_admin_credential(supplied)
+        if method == "machine-token":
+            return method
+        expected = self.dashboard_username()
+        if method == "password" and (expected is None or hmac.compare_digest(username.encode("utf-8"), expected.encode("utf-8"))):
+            return method
+        return None
+
+    def has_connector_key(self) -> bool:
+        with self._connect() as db:
+            return db.execute("SELECT 1 FROM connector_key WHERE id=1").fetchone() is not None
+
+    def ensure_connector_key(self) -> str | None:
+        with self._lock:
+            return None if self.has_connector_key() else self.rotate_connector_key()
+
+    def rotate_connector_key(self) -> str:
+        """Replace the consent secret. Existing per-client grants remain valid."""
+        value = "lbs_" + secrets.token_urlsafe(32)
+        with self._lock, self._connect() as db:
+            db.execute("INSERT INTO connector_key(id,key_hash,created_at) VALUES(1,?,?)"
+                       " ON CONFLICT(id) DO UPDATE SET key_hash=excluded.key_hash,created_at=excluded.created_at",
+                       (sha256_hex(value), time.time()))
+        self.record_event("connector_key_rotated", "admin")
+        return value
+
+    def verify_connector_key(self, supplied: str) -> bool:
+        with self._connect() as db:
+            row = db.execute("SELECT key_hash FROM connector_key WHERE id=1").fetchone()
+        return bool(row and hmac.compare_digest(sha256_hex(supplied), row["key_hash"]))
+
     def set_password(self, password: str) -> None:
         if len(password) < 10:
             raise AuthError("invalid_request", "password must be at least 10 characters")
@@ -942,6 +1013,8 @@ class AuthStore:
         tokens = self.list_api_tokens()
         return {
             "password_set": self.has_password(),
+            "dashboard_username": self.dashboard_username(),
+            "connector_key_set": self.has_connector_key(),
             "legacy_machine_token_mcp": legacy_enabled,
             "oauth_clients": len([c for c in clients if not c["revoked_at"]]),
             "active_oauth_grants": len(self.active_grants()),

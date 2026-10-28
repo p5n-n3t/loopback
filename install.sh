@@ -9,10 +9,10 @@
 # the single cross-platform implementation: python3 runtime/cli.py install.
 #
 # Options (passed through to 'cli.py install'):
-#   --non-interactive  --ingress local|tailscale|cloudflare|both  --host FQDN
+#   --non-interactive  --ingress local|tailscale|cloudflare|both|ngrok  --host FQDN
 #   --port N  --tailscale-mode serve|funnel  --cloudflare-token-file PATH
 #   --cloudflare-tunnel-id ID  --no-service  --no-autostart  --source DIR
-#   --yes  --allow-root
+#   --ngrok-config PATH  --settings-file PATH  --yes  --allow-root
 # Environment:
 #   LOOPBACK_VERSION   release tag for the one-line install (default: latest)
 #   LOOPBACK_CONFIG_DIR  install location (default ~/.config/loopback)
@@ -321,6 +321,7 @@ case "$INGRESS" in
   cloudflare) install_cloudflared || true ;;
   tailscale) install_tailscale || true ;;
   both) install_cloudflared || true; install_tailscale || true ;;
+  ngrok) have ngrok || warn "Install the official ngrok agent and configure its v3 credentials file before public setup" ;;
 esac
 
 # ------------------------------------------------------------------ hand over to the Python installer

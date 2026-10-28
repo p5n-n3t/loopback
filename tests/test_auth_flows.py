@@ -352,5 +352,103 @@ class LegacyInstallTests(unittest.TestCase):
             sys.modules.pop("server", None)
 
 
+class ConnectorSetupTests(unittest.TestCase):
+    setUpClass = classmethod(OAuthFlowTests.setUpClass.__func__)
+    tearDownClass = classmethod(OAuthFlowTests.tearDownClass.__func__)
+    register = OAuthFlowTests.register
+    authorize = OAuthFlowTests.authorize
+    code_from = OAuthFlowTests.code_from
+    exchange = OAuthFlowTests.exchange
+
+    def test_connector_setup_key_is_consent_only_and_rotation_preserves_grants(self):
+        key = self.server.AUTH.rotate_connector_key()
+        self.assertTrue(self.server.AUTH.verify_connector_key(key))
+        self.assertEqual(self.c.post("/admin/login", data={"credential": key}, follow_redirects=False).status_code, 401)
+        self.assertEqual(rpc(self.c, {"Authorization": "Bearer " + key}, "tools/list").status_code, 401)
+        issued = []
+        for _ in range(2):
+            reg = self.register()
+            verifier, challenge = pkce_pair()
+            code = self.code_from(self.authorize(reg["client_id"], challenge, credential=key))
+            response = self.exchange(reg["client_id"], code, verifier)
+            self.assertEqual(response.status_code, 200, response.text)
+            issued.append(response.json())
+        new = self.server.AUTH.rotate_connector_key()
+        self.assertNotEqual(key, new)
+        self.assertFalse(self.server.AUTH.verify_connector_key(key))
+        self.assertTrue(self.server.AUTH.verify_connector_key(new))
+        reg = self.register()
+        _, challenge = pkce_pair()
+        self.assertEqual(self.authorize(reg["client_id"], challenge, credential=key).status_code, 401)
+        for token in issued:
+            self.server.AUTH.verify_access_token(token["access_token"])
+        self.assertIsNone(self.server.AUTH.ensure_connector_key())
+
+    def test_dashboard_account_and_key_endpoints_require_csrf_and_reauthentication(self):
+        self.c.post("/admin/login", data={"credential": self.machine_token}, follow_redirects=False)
+        csrf = self.c.get("/api/admin/session").json()["csrf"]
+        headers = {"X-Loopback-CSRF": csrf}
+        self.assertEqual(self.c.post("/api/admin/auth/connector-key", json={"current": self.machine_token}).status_code, 403)
+        self.assertEqual(self.c.post("/api/admin/auth/connector-key", json={"current": "wrong"}, headers=headers).status_code, 403)
+        r = self.c.post("/api/admin/auth/connector-key", json={"current": self.machine_token}, headers=headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(self.server.AUTH.verify_connector_key(r.json()["key"]))
+        self.assertFalse(r.json()["grants_revoked"])
+        self.assertNotIn(r.json()["key"], self.c.get("/api/admin/auth").text)
+        r = self.c.post("/api/admin/auth/account", json={"current": self.machine_token, "username": "owner", "password": "new dashboard password"}, headers=headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.c.get("/api/admin/session").status_code, 401)
+        self.assertEqual(self.c.post("/admin/login", data={"username": "wrong", "credential": "new dashboard password"}, follow_redirects=False).status_code, 401)
+        self.assertEqual(self.c.post("/admin/login", data={"username": "owner", "credential": "new dashboard password"}, follow_redirects=False).status_code, 303)
+
+
+class DashboardAccountTests(unittest.TestCase):
+    def test_old_database_adds_username_without_resetting_password(self):
+        import sqlite3
+        import tempfile
+        from auth import AuthStore, hash_password
+        with tempfile.TemporaryDirectory() as directory:
+            with sqlite3.connect(Path(directory) / "auth.db") as db:
+                db.execute("CREATE TABLE admin_credential (id INTEGER PRIMARY KEY, password_hash TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL)")
+                db.execute("INSERT INTO admin_credential VALUES(1, ?, 1, 1)", (hash_password("old account password"),))
+            store = AuthStore(Path(directory), resource_uris=[RESOURCE], base_urls=[RESOURCE[:-4]])
+            self.assertIsNone(store.ensure_dashboard_account())
+            self.assertIsNone(store.dashboard_username())
+            self.assertEqual(store.verify_dashboard_login("", "old account password"), "password")
+
+    def test_bootstrap_username_migration_and_session_revocation(self):
+        import tempfile
+        from auth import AuthStore
+        with tempfile.TemporaryDirectory() as directory:
+            store = AuthStore(Path(directory), resource_uris=[RESOURCE], base_urls=[RESOURCE[:-4]])
+            account = store.ensure_dashboard_account()
+            self.assertIsNotNone(account)
+            self.assertIsNone(store.ensure_dashboard_account())
+            self.assertIsNone(store.verify_dashboard_login("", account["password"]))
+            self.assertIsNone(store.verify_dashboard_login("wrong", account["password"]))
+            self.assertEqual(store.verify_dashboard_login(account["username"], account["password"]), "password")
+            self.assertEqual(store.verify_dashboard_login("", store.machine_token), "machine-token")
+            sid, _ = store.create_session()
+            store.set_dashboard_account("new-user", "replacement password")
+            self.assertIsNone(store.get_session(sid))
+            self.assertIsNone(store.verify_dashboard_login(account["username"], account["password"]))
+            self.assertEqual(store.verify_dashboard_login("new-user", "replacement password"), "password")
+            key = store.ensure_connector_key()
+            reopened = AuthStore(Path(directory), resource_uris=[RESOURCE], base_urls=[RESOURCE[:-4]])
+            self.assertIsNone(reopened.ensure_dashboard_account())
+            self.assertIsNone(reopened.ensure_connector_key())
+            self.assertTrue(reopened.verify_connector_key(key))
+            self.assertEqual(reopened.verify_dashboard_login("new-user", "replacement password"), "password")
+            raw = (Path(directory) / "auth.db").read_bytes()
+            self.assertNotIn(key.encode(), raw)
+            self.assertNotIn(b"replacement password", raw)
+        with tempfile.TemporaryDirectory() as directory:
+            store = AuthStore(Path(directory), resource_uris=[RESOURCE], base_urls=[RESOURCE[:-4]])
+            store.set_password("legacy password")
+            self.assertIsNone(store.ensure_dashboard_account())
+            self.assertEqual(store.verify_dashboard_login("", "legacy password"), "password")
+            self.assertEqual(store.verify_admin_credential(store.machine_token), "machine-token")
+
+
 if __name__ == "__main__":
     unittest.main()

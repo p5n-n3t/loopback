@@ -50,6 +50,7 @@ def default_config() -> dict[str, Any]:
                 "config_file": None,
                 "access_policy": "oauth",  # oauth | cloudflare-access | both
             },
+            "ngrok": {"enabled": False, "hostname": None, "config_file": None},
             "tailscale": {
                 "enabled": False,
                 "mode": "serve",  # serve = tailnet only, funnel = public internet
@@ -149,7 +150,10 @@ def migrate_legacy_env(env: dict[str, str], base: dict[str, Any]) -> dict[str, A
                 pass
     ingress = (env.get("LOOPBACK_INGRESS") or "local").strip().lower()
     host = (env.get("LOOPBACK_PUBLIC_HOST") or "localhost").strip().rstrip(".")
-    if ingress == "cloudflare":
+    if ingress == "ngrok":
+        cfg["ingress"]["ngrok"].update({"enabled": True, "hostname": host,
+            "config_file": env.get("LOOPBACK_NGROK_CONFIG_FILE") or None})
+    elif ingress == "cloudflare":
         cfg["ingress"]["cloudflare"].update({
             "enabled": True,
             "hostname": host,
@@ -210,6 +214,12 @@ def validate(cfg: dict[str, Any]) -> list[str]:
             errors.append("cloudflare.config_file must be a non-empty path")
         if cf.get("access_policy") not in {"oauth", "cloudflare-access", "both"}:
             errors.append("cloudflare.access_policy must be oauth, cloudflare-access or both")
+    ng = ingress.get("ngrok") or {}
+    if ng.get("enabled"):
+        if not isinstance(ng.get("hostname"), str) or not HOSTNAME_RE.fullmatch(ng["hostname"]) or "." not in ng["hostname"]:
+            errors.append("ngrok.hostname must be a fully-qualified hostname")
+        if not isinstance(ng.get("config_file"), str) or not ng["config_file"].strip():
+            errors.append("ngrok.config_file must reference an ngrok v3 configuration file")
     ts = ingress.get("tailscale") or {}
     if ts.get("enabled"):
         if ts.get("mode") not in INGRESS_MODES:
@@ -296,6 +306,9 @@ class ConfigStore:
         ing = self.data.get("ingress", {})
         cf = ing.get("cloudflare", {})
         ts = ing.get("tailscale", {})
+        ng = ing.get("ngrok", {})
+        if ng.get("enabled") and ng.get("hostname"):
+            hosts.append(str(ng["hostname"]).lower())
         if cf.get("enabled") and cf.get("hostname"):
             hosts.append(str(cf["hostname"]).lower())
         if ts.get("enabled") and ts.get("dns_name"):
@@ -370,7 +383,9 @@ class ConfigStore:
     def write_legacy_env(self) -> None:
         cfg = self.data
         ing = cfg["ingress"]
-        if ing["cloudflare"].get("enabled"):
+        if ing.get("ngrok", {}).get("enabled"):
+            ingress = "ngrok"
+        elif ing["cloudflare"].get("enabled"):
             ingress = "cloudflare"
         elif ing["tailscale"].get("enabled"):
             ingress = "tailscale"
@@ -384,6 +399,7 @@ class ConfigStore:
             f"LOOPBACK_MAX_OUTPUT_BYTES={cfg['max_output_bytes']}",
             f"LOOPBACK_STARTUP_TIMEOUT={cfg['startup_timeout']}",
             f"LOOPBACK_INGRESS={ingress}",
+            f"LOOPBACK_NGROK_CONFIG_FILE={ing.get('ngrok', {}).get('config_file') or ''}",
             f"LOOPBACK_CLOUDFLARE_TUNNEL_ID={ing['cloudflare'].get('tunnel_id') or ''}",
             f"LOOPBACK_CLOUDFLARE_TOKEN_FILE={ing['cloudflare'].get('token_file') or ''}",
             f"LOOPBACK_CLOUDFLARE_CONFIG_FILE={ing['cloudflare'].get('config_file') or ''}",

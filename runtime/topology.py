@@ -403,6 +403,8 @@ class TopologyBuilder:
         edges = [{"id": "clients->gateway"}]
         if (ing.get("cloudflare") or {}).get("enabled"):
             edges += [{"id": "clients->ingress:cloudflare"}, {"id": "ingress:cloudflare->gateway"}]
+        if (ing.get("ngrok") or {}).get("enabled"):
+            edges += [{"id": "clients->ingress:ngrok"}, {"id": "ingress:ngrok->gateway"}]
         if (ing.get("tailscale") or {}).get("enabled"):
             edges += [{"id": "clients->ingress:tailscale"}, {"id": "ingress:tailscale->gateway"}]
         edges += [{"id": f"gateway->ssh:{t['name']}"} for t in self._ssh_targets()]
@@ -501,6 +503,22 @@ class TopologyBuilder:
                           **self._status(state.get("ingress:cloudflare->gateway")),
                           "detail": {"note": "outbound tunnel opened by cloudflared on the gateway; requests are "
                                              "forwarded to the local listener"}})
+
+        # ngrok: process liveness and public health remain separate observations.
+        ng = ing.get("ngrok") or {}
+        if ng.get("enabled"):
+            dn, grp = label_for("ingress:ngrok", None, "ingress")
+            nodes.append({"id": "ingress:ngrok", "type": "tunnel", "kind": "unknown", "label": "ngrok",
+                          "display_name": dn, "group": grp,
+                          "detail": {"hostname": ng.get("hostname"), "exposure": "public", "ownership": "managed"}})
+            edges.append({"id": "clients->ingress:ngrok", "from": "clients", "to": "ingress:ngrok",
+                          "transport": "https", "protocol": "mcp", "exposure": "public", "initiator": "clients",
+                          "proxied": True, "direct": False, **self._status(state.get("clients->ingress:ngrok")),
+                          "detail": {"url": f"https://{ng.get('hostname')}/mcp"}})
+            edges.append({"id": "ingress:ngrok->gateway", "from": "ingress:ngrok", "to": "gateway",
+                          "transport": "ngrok-tunnel", "protocol": "http", "exposure": "public", "initiator": "gateway",
+                          "proxied": True, "direct": False, **self._status(state.get("ingress:ngrok->gateway")),
+                          "detail": {"note": "Process liveness does not prove authenticated MCP connectivity"}})
 
         # Tailscale ---------------------------------------------------------
         ts = ing.get("tailscale") or {}
@@ -757,6 +775,15 @@ class TopologyBuilder:
         now = time.time()
         out: dict[str, dict[str, Any]] = {}
         cf = status.get("cloudflare") or {}
+        ng = status.get("ngrok") or {}
+        if ng.get("enabled"):
+            ph = ng.get("public_health") or {}
+            out["clients->ingress:ngrok"] = {
+                "status": "healthy" if ph.get("ok") else ("degraded" if ph.get("status") else "untested"),
+                "latency_ms": ph.get("latency_ms"), "error": _clip(ph.get("error")), "checked_at": now}
+            out["ingress:ngrok->gateway"] = {
+                "status": "healthy" if ng.get("running") else "disconnected", "latency_ms": None,
+                "error": None if ng.get("running") else _clip(ng.get("last_error")), "checked_at": now}
         if cf.get("enabled"):
             ph = cf.get("public_health") or {}
             out["clients->ingress:cloudflare"] = {

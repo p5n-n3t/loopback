@@ -73,6 +73,8 @@ const DM = {
   menu: ['#####', '.....', '#####', '.....', '#####'], close: ['#...#', '.#.#.', '..#..', '.#.#.', '#...#'],
 };
 function dm(name, cls = '') {
+  const asset = globalThis.LOOPBACK_DOTRIX?.[name];
+  if (asset) return `<svg class="dmx ${cls}" viewBox="${asset.viewBox}" aria-hidden="true" focusable="false">${asset.dots.map(([x, y]) => `<circle cx="${x}" cy="${y}" r=".5"/>`).join('')}</svg>`;
   const rows = DM[name] || DM.overview, dots = [];
   rows.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === '#') dots.push(`<circle cx="${2 + x * 4}" cy="${2 + y * 4}" r="1.55"/>`); }));
   return `<svg class="dmx ${cls}" viewBox="0 0 20 20" aria-hidden="true" focusable="false">${dots.join('')}</svg>`;
@@ -327,6 +329,7 @@ function exposureBadges(ing) {
   if (ing.local && ing.local.enabled !== false) out.push(badge('local', 'ok'));
   const ts = ing.tailscale || {}, cf = ing.cloudflare || {};
   if (ts.enabled) out.push(ts.mode === 'funnel' ? badge('public (funnel)', 'bad') : badge('tailnet', 'info'));
+  if ((ing.ngrok || {}).enabled) out.push(badge('public (ngrok)', 'bad'));
   if (cf.enabled) {
     out.push(badge('public (cloudflare)', 'bad'));
     if (cf.access_policy === 'cloudflare-access' || cf.access_policy === 'both') out.push(badge('access-protected', 'ok'));
@@ -836,6 +839,16 @@ views.auth = async v => {
       <td class="act"><button class="sm danger" data-act="revoke" data-kind="grants" data-id="${g.family_id}" data-label="grant for ${cName(g.client_id)}">Revoke</button></td></tr>`), 'No active grants.'), 'c12')}
     ${card('Dashboard sessions', H`${table(['Signed in', 'Last seen', 'Expires', 'IP', 'Browser'], sessions.map(s => H`<tr><td>${time(s.created_at)}</td><td>${time(s.last_seen_at)}</td><td>${time(s.expires_at)}</td><td>${s.ip}</td><td class="small muted">${String(s.user_agent || '').slice(0, 80)}</td></tr>`), 'No sessions.')}
       <div class="row end"><button class="danger" data-act="revoke-sessions">Sign out all sessions</button></div>`)}
+    ${card('Dashboard account', H`<p class="small">Current username: <b>${a.dashboard_username || 'Not set (legacy password login)'}</b>. Account changes sign out every dashboard session.</p>
+      <form data-form="dashboard-account" autocomplete="off">${errBox}
+      ${fld('Current password or machine token', 'ac_current', inp('current', '', { id: 'ac_current', type: 'password', req: true }))}
+      ${fld('Dashboard username', 'ac_username', inp('username', a.dashboard_username || '', { id: 'ac_username', req: true, extra: 'autocomplete="username" maxlength="80"' }))}
+      ${fld('New password', 'ac_password', inp('password', '', { id: 'ac_password', type: 'password', req: true, extra: 'autocomplete="new-password" minlength="10"' }))}
+      ${fld('Repeat password', 'ac_repeat', inp('repeat', '', { id: 'ac_repeat', type: 'password', req: true, extra: 'autocomplete="new-password"' }))}
+      <button class="primary" type="submit">Save account and sign out</button></form>`)}
+    ${card('Connector setup key', H`<p>Reusable authorization key: ${a.connector_key_set ? 'set' : 'not set'}. Add the MCP URL in an OAuth client, then enter this key on the Loopback consent page and approve the scopes.</p>
+      <p class="small">The key cannot open the dashboard or call MCP tools directly. Rotation prevents future approvals with the old key. Existing OAuth grants and bearer API tokens remain valid. Revoke a grant or client separately to remove its access.</p>
+      <button data-act="connector-key" class="primary">${a.connector_key_set ? 'Rotate' : 'Create'} setup key</button>`)}
     ${card('Change dashboard password', H`<form data-form="password" autocomplete="off">${errBox}
       ${fld('Current password or machine token', 'f_current', inp('current', '', { type: 'password', req: true, extra: 'autocomplete="current-password"' }))}
       ${fld('New password', 'f_new', inp('new', '', { type: 'password', req: true, extra: 'autocomplete="new-password" minlength="10"' }), 'At least 10 characters; a passphrase is best.')}
@@ -885,6 +898,19 @@ A['revoke-sessions'] = async () => {
   if (!await confirmDo('Sign out everywhere?', H`<p>Every dashboard session, including this one, is ended.</p>`, 'Sign out all')) return;
   await post('/api/admin/auth/sessions/revoke-all'); toLogin();
 };
+F['dashboard-account'] = async (f, o) => {
+  if (o.password !== o.repeat) throw new ApiError('The passwords do not match.', 400);
+  await post('/api/admin/auth/account', { current: o.current, username: o.username, password: o.password }); toLogin();
+};
+A['connector-key'] = async () => {
+  const o = await modal({ title: 'Create or rotate connector setup key', ok: 'Generate key',
+    body: H`<p>The old key stops authorizing new clients. Existing grants remain valid. Revoke grants separately to remove access.</p>${fld('Current password or machine token', 'ck_current', inp('current', '', { id: 'ck_current', type: 'password', req: true }))}` });
+  if (!o) return;
+  const r = await post('/api/admin/auth/connector-key', { current: o.current });
+  await modal({ title: 'Copy your connector setup key now', ok: 'Done', okOnly: true,
+    body: H`<p>Shown once. Enter it only on this Loopback instance's OAuth consent page. Reuse it to authorize additional clients.</p><div class="secret-once" id="secretOnce">${r.key}</div><button type="button" data-act="copy-secret">Copy</button>` });
+  r.key = null; refresh();
+};
 F.password = async (f, o) => {
   if (o.new !== o.new2) throw new ApiError('The new passwords do not match.', 400);
   await post('/api/admin/auth/password', { current: o.current, new: o.new }); f.reset(); toast('Password changed', 'ok');
@@ -915,10 +941,26 @@ A['ing-restart'] = async t => {
   await post(`/api/admin/ingress/${t.dataset.name}/restart`); done('Restarted');
 };
 A['ing-diag'] = t => diagInto(t.dataset.name);
+const ngrokCard = (ing, cfg) => {
+  const n = ing.ngrok || {}, c = cfg.ngrok || {};
+  return card('ngrok · fixed public URL', H`<p>Use an ngrok account hostname without buying a domain. The official agent and a v3 credentials file must already exist.</p>
+    ${kv([['Exposure', n.enabled ? badge('public', 'bad') : badge('off', 'off')], ['Status', n.status || 'disabled'], ['Agent installed', ob(n.installed)], ['Running', ob(n.running)], ['MCP URL', n.enabled && n.hostname ? H`<code>https://${n.hostname}/mcp</code>` : null], ['Last error', n.last_error || null]])}
+    <form data-form="ngrok">${errBox}<label class="check"><input type="checkbox" name="enabled"${chk(c.enabled)}> <span>Enable ngrok public ingress</span></label>
+    ${fld('Fixed ngrok hostname', 'ng_hostname', inp('hostname', c.hostname, {id:'ng_hostname', ph:'your-name.ngrok-free.app'}), 'Use the hostname assigned or reserved in your ngrok account. Random URLs cannot preserve OAuth connections.')}
+    ${fld('ngrok v3 config file', 'ng_config_file', inp('config_file', c.config_file, {id:'ng_config_file', ph:'~/.config/ngrok/ngrok.yml'}), 'Path only. Credentials remain in this file. Agent traffic inspection and its local web UI are disabled.')}
+    <label class="check"><input type="checkbox" name="confirm_public"> <span>I understand this exposes Loopback to the public internet.</span></label>
+    <div class="row end"><button type="submit" class="primary">Save &amp; apply ngrok</button></div></form>
+    <p class="small muted">Loopback OAuth protects MCP access. Other configured ingress paths remain enabled. A running agent does not verify an authenticated MCP connection.</p>`, 'c12');
+};
+F.ngrok = async (f, o) => {
+  if (o.enabled && !o.confirm_public) throw new ApiError('Confirm public exposure before enabling ngrok.', 400);
+  await put('/api/admin/ingress/ngrok', {enabled: !!o.enabled, hostname: o.hostname || null, config_file: o.config_file || null, confirm_public: !!o.confirm_public});
+  done('ngrok applied');
+};
 views.cloudflare = async v => {
   const { ing, cfg } = await ingressData(), cf = ing.cloudflare || {}, c = cfg.cloudflare || {};
   const prot = c.access_policy === 'cloudflare-access' || c.access_policy === 'both';
-  v.render(H`${head('Cloudflare Tunnel', 'Publish this machine on your own hostname via an outbound tunnel.', H`<button data-act="ing-restart" data-name="cloudflare">Restart</button>`)}${bothNote(ing)}
+  v.render(H`${head('Public tunnels', 'Publish this machine through a named Cloudflare tunnel or a fixed ngrok URL.', H`<button data-act="ing-restart" data-name="cloudflare">Restart</button>`)}${bothNote(ing)}
     <div class="grid">${card('Status', H`<div class="chips">${cf.enabled ? badge('public', 'bad') : badge('off', 'off')}${cf.enabled && prot ? badge('access-protected', 'ok') : ''}</div><hr class="sep">
       ${kv([['Enabled', yes(cf.enabled)], ['Hostname', cf.hostname ? H`<code>${cf.hostname}</code>` : null], ['Tunnel', cf.tunnel_id_prefix ? H`<code>${cf.tunnel_id_prefix}…</code>` : null], ['cloudflared installed', ob(cf.installed)], ['Running', ob(cf.running, 'running', 'stopped')], ['Status', cf.status], ['DNS', ob(cf.dns_ok, 'ok', 'not resolving')], ['Public health', cf.public_health == null ? null : typeof cf.public_health === 'object' ? safeKv(cf.public_health) : cf.public_health], ['Last error', cf.last_error || null]])}`)}
     ${card('Configuration', H`<form data-form="cloudflare">${errBox}
@@ -928,7 +970,9 @@ views.cloudflare = async v => {
       ${fld('Tunnel token file', 'f_token_file', inp('token_file', c.token_file, { ph: '~/.cloudflared/token' }), 'Path only, for token-based tunnels.')}
       ${fld('Access policy', 'f_access_policy', H`<select id="f_access_policy" name="access_policy">${opt('oauth', c.access_policy || 'oauth', 'Loopback OAuth only')}${opt('cloudflare-access', c.access_policy, 'Cloudflare Access only')}${opt('both', c.access_policy, 'Cloudflare Access + Loopback OAuth')}</select>`)}
       <div class="row end"><button type="submit" class="primary">Save &amp; apply</button></div></form>`)}
-    ${card('Diagnostics', raw('<div id="diag"><span class="spin"></span></div>'), { cls: 'c12', actions: H`<button class="sm" data-act="ing-diag" data-name="cloudflare">Re-run</button>` })}</div>`);
+    ${card('Diagnostics', raw('<div id="diag"><span class="spin"></span></div>'), { cls: 'c12', actions: H`<button class="sm" data-act="ing-diag" data-name="cloudflare">Re-run</button>` })}
+    ${ngrokCard(ing, cfg)}
+    ${card('Other tunnel providers', H`<p>Cloudflare Quick Tunnels do not support SSE. Loopback does not offer them for MCP. Localtunnel cannot guarantee the requested subdomain. Tunnelto needs a reserved origin and streaming verification before managed support.</p><p class="muted">Use the named Cloudflare tunnel above for a persistent Cloudflare URL, or configure ngrok with a fixed account hostname.</p>`, 'c12')}</div>`);
   diagInto('cloudflare');
 };
 F.cloudflare = async (f, o) => {
@@ -1166,6 +1210,7 @@ views.welcome = async v => {
       <label class="choice"><input type="radio" name="ingress" value="serve"> <b>Tailscale Serve — tailnet only</b><span class="muted">Private HTTPS for devices in your tailnet.</span></label>
       <label class="choice public"><input type="radio" name="ingress" value="funnel"> <b>Tailscale Funnel — public internet</b><span class="muted">Needed for cloud clients. Anyone can reach it; OAuth protects it.</span></label>
       <label class="choice public"><input type="radio" name="ingress" value="cloudflare"> <b>Cloudflare Tunnel — public internet</b><span class="muted">Your own hostname, optional Cloudflare Access.</span></label>
+      <label class="choice public"><input type="radio" name="ingress" value="ngrok"> <b>ngrok — public internet</b><span class="muted">A fixed account hostname and existing v3 agent configuration.</span></label>
       <label class="check"><input type="checkbox" name="confirm_public"> <span>I understand public options expose Loopback to the internet</span></label>
       <div class="row end">${back}<button type="submit" class="primary">Continue</button></div></form>`;
   } else if (step === 2) {
@@ -1175,7 +1220,7 @@ views.welcome = async v => {
   } else if (step === 3) {
     const a = await soft('/api/admin/auth') || {};
     body = H`<div class="grid"><div class="card flat c6"><h2>OAuth client (recommended)</h2><p class="muted">Add this MCP URL in an OAuth-capable client; it opens a consent page here.</p>
-      ${arr(a.resource_uris).length ? H`${a.resource_uris.map(u => H`<div class="secret-once">${u}</div>`)}` : H`<p class="small muted">Enable an ingress path to get a reachable URL.</p>`}<p class="small"><a href="#/auth">Manage OAuth clients</a></p></div>
+      ${arr(a.resource_uris).length ? H`${a.resource_uris.map(u => H`<div class="secret-once">${u}</div>`)}` : H`<p class="small muted">Enable an ingress path to get a reachable URL.</p>`}<p class="small">Approve the client here with your reusable connector setup key. <a href="#/auth">Create or rotate the setup key and manage OAuth clients</a>.</p></div>
       <div class="card flat c6"><h2>API token</h2><p class="muted">For bearer-only clients and scripts. Scoped and revocable; shown once.</p><button class="primary" data-act="create-token">Create API token</button></div></div>
       <div class="row end">${back}<a class="btn primary" href="#/welcome?step=4">Continue</a></div>`;
   } else {
@@ -1187,11 +1232,11 @@ views.welcome = async v => {
 const wizGo = n => { wz.step = n; location.hash = '#/welcome?step=' + n; };
 F['wiz-identity'] = async (f, o) => { await put('/api/admin/config', { display_name: o.display_name || null, node_kind: o.node_kind }); wizGo(1); };
 F['wiz-ingress'] = async (f, o) => {
-  if ((o.ingress === 'funnel' || o.ingress === 'cloudflare') && !o.confirm_public) throw new ApiError('Tick the confirmation to choose a public option.', 400);
+  if (['funnel', 'cloudflare', 'ngrok'].includes(o.ingress) && !o.confirm_public) throw new ApiError('Tick the confirmation to choose a public option.', 400);
   if (o.ingress === 'serve' || o.ingress === 'funnel') {
     await put('/api/admin/ingress/tailscale', { enabled: true, mode: o.ingress, https_port: 443, ...(o.ingress === 'funnel' ? { confirm_public: true } : {}) });
     toast('Tailscale ' + o.ingress + ' enabled', 'ok');
-  } else if (o.ingress === 'cloudflare') { toast('Configure the tunnel, then return to the wizard'); location.hash = '#/cloudflare'; wz.step = 2; return; }
+  } else if (o.ingress === 'cloudflare' || o.ingress === 'ngrok') { toast('Configure the selected tunnel, then return to the wizard'); location.hash = '#/cloudflare'; wz.step = 2; return; }
   wizGo(2);
 };
 
