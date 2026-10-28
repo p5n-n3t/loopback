@@ -88,5 +88,28 @@
     "Live ngrok account and end-to-end public transport",
     "Owner desktop/worker deployment and actual terminal rendering",
     "ora8 SSH details, registration and worker rollout"
-  ]
+  ],
+  "live_followup": {
+    "source_commit": "7d1df70",
+    "inventory": "docs/proof/LIVE-WORKER-INVENTORY-2026-10-28.json",
+    "real_http_oauth": [
+      "none",
+      "client_secret_basic",
+      "client_secret_post"
+    ],
+    "http_checks": [
+      "DCR with mixed-grant narrowing",
+      "PKCE consent and token exchange",
+      "wrong Basic secret rejection",
+      "refresh",
+      "nonempty MCP tools/list result",
+      "unsupported-only grant rejection"
+    ],
+    "scope": "Real HTTP in isolated Lightsprint gateway. No real provider account/browser or desktop update.",
+    "flow": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/7h2g4IzFargW0XpVG5aol.png",
+    "expectations": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/bRzpEIohUwz7BWfdP4Q1X.png",
+    "ora8_actual_run": "blocked by owner Tailscale identity check and local registry access",
+    "discovery_tests": 8,
+    "lab_syntax_and_guard": "pass"
+  }
 }

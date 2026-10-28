@@ -176,3 +176,11 @@ Login recovery requires the owner's normal desktop terminal because `~/.config/l
 Use `loopback auth enroll`, then open the generated localhost link to choose a password. Do not paste that link or password into chat.
 Older installed builds have password-only login. The new account username is not retroactively created by an upgrade.
 The isolated Lightsprint preview has its own test account and is not the owner's installed dashboard.
+
+Final follow-up code revision: `7d1df70`. The strengthened lab runner verifies actual nonempty MCP tool results, not HTTP status alone.
+Independent real HTTP checks in the existing Lightsprint instance pass public, Basic-secret and form-secret registration,
+PKCE consent/exchange, refresh and nonempty tool results. Mixed grants narrow correctly. Unsupported-only grants fail.
+The proof refresh adds one combined flow chart and one source-based ora8 expectation sheet. Existing unchanged UI captures remain current.
+The lab sheet has four Met code/guard expectations and two Unverified runtime/account expectations. No ora8 success is claimed.
+Next: the owner completes the Tailscale identity check and uses the normal local CLI to register ora8 and recover dashboard access.
+Then confirm the SSH user, provision the dedicated lab account, and execute the saved runner. Do not repeat the earlier screenshot sweep.
