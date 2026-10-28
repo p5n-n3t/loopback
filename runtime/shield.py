@@ -209,6 +209,7 @@ class Shield:
         self.store.blocklist_provider = self.blocked_now
         self.buckets: OrderedDict[tuple[str, str], list[float]] = OrderedDict()
         self.blocked: dict[str, float] = {}
+        self.block_reasons: dict[str, tuple[str, str]] = {}
         self.rotating: dict[str, float] = {}
         self.floods, self.scans = _Windows(FLOOD_WINDOW), _Windows(ABUSE_WINDOW)
         self.failures, self.prefixes = _Windows(ABUSE_WINDOW), _Windows(ABUSE_WINDOW)
@@ -245,10 +246,13 @@ class Shield:
         now = time.time()
         for ip in [ip for ip, until in self.blocked.items() if until <= now]:
             del self.blocked[ip]
-        return [{"ip": ip, "until": until} for ip, until in sorted(self.blocked.items())]
+            self.block_reasons.pop(ip, None)
+        return [{"ip": ip, "until": until, "kind": self.block_reasons.get(ip, ("", ""))[0], "reason": self.block_reasons.get(ip, ("", ""))[1]}
+                for ip, until in sorted(self.blocked.items())]
 
     def unblock(self, ip: str) -> bool:
         found = self.blocked.pop(ip, None) is not None
+        self.block_reasons.pop(ip, None)
         for windows in (self.floods, self.scans, self.failures):
             windows.clear(ip)
         return found
@@ -257,8 +261,11 @@ class Shield:
         if ip in set(cfg["trusted_proxies"]):
             return
         self.blocked[ip] = time.time() + float(cfg["block_minutes"]) * 60
+        self.block_reasons[ip] = (kind, reason)
         while len(self.blocked) > int(cfg["max_tracked_ips"]):
-            self.blocked.pop(min(self.blocked, key=self.blocked.get))
+            oldest = min(self.blocked, key=self.blocked.get)
+            del self.blocked[oldest]
+            self.block_reasons.pop(oldest, None)
         self.store.record(kind, ip, action="blocked", detail={"reason": reason, "minutes": cfg["block_minutes"]}, **meta)
 
     def _take(self, key: tuple[str, str], per_minute: float, burst: float, now: float, limit: int) -> float:

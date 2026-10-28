@@ -286,7 +286,7 @@ input.invalid,textarea.invalid{border-color:var(--bad)}
 .ring-stat svg{width:48px;height:48px;flex:none;overflow:visible}
 .ring-stat.lg svg{width:64px;height:64px}
 .ring-stat circle{fill:none;stroke-width:3.2;stroke-linecap:round}.ring-track{stroke:var(--line)}
-.ring-fill{stroke:var(--ok);transform:rotate(-90deg);transition:stroke-dasharray .4s}
+.ring-fill{stroke:var(--ok);transition:stroke-dasharray .4s}
 .ring-stat.warn .ring-fill{stroke:var(--warn)}.ring-stat.bad .ring-fill{stroke:var(--bad)}
 .ring-stat.unknown .ring-track{stroke-dasharray:2 3}.ring-stat.unknown text{fill:var(--muted)}
 .ring-stat text{font:600 12px var(--sans);fill:var(--text);font-variant-numeric:tabular-nums}
@@ -300,9 +300,9 @@ input.invalid,textarea.invalid{border-color:var(--bad)}
 .rate-head b{font-weight:600}.rate-head small{color:var(--faint);font-size:10px;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}
 .rate-bar{display:grid;grid-template-columns:38px 1fr auto;gap:8px;align-items:center;font-size:11px;font-variant-numeric:tabular-nums;margin:3px 0}
 .rate-label{color:var(--muted)}.rate-value{min-width:72px;text-align:right}
-.rate-track{display:block;height:6px;border-radius:4px;background:var(--line);overflow:hidden}
-.rate-fill{display:block;height:100%;border-radius:4px;background:var(--info);transition:width .4s}
-.rate-group:nth-of-type(2) .rate-fill{background:var(--ok)}
+.rate-track{display:block;width:100%;height:6px;border-radius:4px;background:var(--line);overflow:hidden}
+.rate-fill{fill:var(--info);transition:width .4s}
+.rate-group:nth-of-type(2) .rate-fill{fill:var(--ok)}
 .rate-bar.first .rate-track,.rate-bar.unavailable .rate-track,.rate-bar.stale .rate-track{background:repeating-linear-gradient(90deg,var(--line) 0 4px,transparent 4px 7px)}
 .rate-bar.first .rate-value,.rate-bar.unavailable .rate-value,.rate-bar.stale .rate-value{color:var(--faint)}
 .sample-state{margin-top:6px;font-size:10.5px}

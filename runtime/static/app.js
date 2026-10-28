@@ -394,14 +394,14 @@ const tone = x => x == null ? 'unknown' : x >= 90 ? 'bad' : x >= 70 ? 'warn' : '
 function ring(value, label, detail = '', { size = 'lg', cls = '' } = {}) {
   const n = value == null ? 0 : Math.max(0, Math.min(100, value));
   const r = size === 'lg' ? 26 : 20, c = r * 2 + 8, mid = c / 2;
-  return H`<div class="ring-stat ${size} ${tone(value)} ${cls}" data-testid="ring-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}"><svg viewBox="0 0 ${c} ${c}" role="img" aria-label="${label}: ${per(value)}"><circle class="ring-track" cx="${mid}" cy="${mid}" r="${r}"/><circle class="ring-fill" cx="${mid}" cy="${mid}" r="${r}" pathLength="100" stroke-dasharray="${value == null ? 0 : Math.max(n, n > 0 ? 1.5 : 0)} 100" style="transform-origin:${mid}px ${mid}px"/><text x="${mid}" y="${mid + (size === 'lg' ? 5 : 4)}" text-anchor="middle">${gaugeText(value)}</text></svg><span><b>${label}</b><small>${detail}</small></span></div>`;
+  return H`<div class="ring-stat ${size} ${tone(value)} ${cls}" data-testid="ring-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}"><svg viewBox="0 0 ${c} ${c}" role="img" aria-label="${label}: ${per(value)}"><circle class="ring-track" cx="${mid}" cy="${mid}" r="${r}"/><circle class="ring-fill" cx="${mid}" cy="${mid}" r="${r}" pathLength="100" stroke-dasharray="${value == null ? 0 : Math.max(n, n > 0 ? 1.5 : 0)} 100" transform="rotate(-90 ${mid} ${mid})"/><text x="${mid}" y="${mid + (size === 'lg' ? 5 : 4)}" text-anchor="middle">${gaugeText(value)}</text></svg><span><b>${label}</b><small>${detail}</small></span></div>`;
 }
 /* KB/s bars with a real denominator: the largest rate on the page right now (never a made-up percentage). */
 const kbs = n => n == null ? '—' : n < 1024 * 100 ? (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB/s' : (n / 1048576).toFixed(1) + ' MB/s';
 function rateBar(label, value, max, state) {
   const p = value == null || !max ? 0 : Math.max(value > 0 ? 2 : 0, Math.min(100, value / max * 100));
   const text = state === 'first' ? 'first sample' : state === 'unavailable' ? 'unavailable' : value === 0 ? '0 KB/s (idle)' : kbs(value);
-  return H`<div class="rate-bar ${state}"><span class="rate-label">${label}</span><span class="rate-track" aria-hidden="true"><span class="rate-fill" style="width:${p.toFixed(1)}%"></span></span><span class="rate-value">${text}</span></div>`;
+  return H`<div class="rate-bar ${state}"><span class="rate-label">${label}</span><svg class="rate-track" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><rect class="rate-fill" x="0" y="0" width="${p.toFixed(1)}" height="6"/></svg><span class="rate-value">${text}</span></div>`;
 }
 function sampleState(w) {
   const rs = (w.rates || {}).state;

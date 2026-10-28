@@ -159,7 +159,7 @@ class DiscoveryService:
             error = OLD_WORKER if "Unknown binding action" in message else "Host unreachable; check SSH and worker setup"
             if "not installed" in message:
                 error = "Worker is not installed on this host; discovery needs the worker"
-            stale = copy.deepcopy(previous) if previous and previous.get("status") in ("ok", "unreachable") else None
+            stale = copy.deepcopy(previous) if previous and previous.get("observed_at") else None  # only a real inventory counts
             return {"target": target, "status": "unreachable", "error": error, "observed_at": (stale or {}).get("observed_at"),
                     "routes": (stale or {}).get("routes", []), "listeners": (stale or {}).get("listeners", []),
                     "bindings": (stale or {}).get("bindings", []), "partial": True, "last_known": bool(stale)}
