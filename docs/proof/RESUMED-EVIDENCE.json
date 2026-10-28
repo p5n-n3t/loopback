@@ -87,10 +87,10 @@
     "Actual ChatGPT and Claude registration, consent, refresh and reconnect",
     "Live ngrok account and end-to-end public transport",
     "Owner desktop/worker deployment and actual terminal rendering",
-    "ora8 SSH details, registration and worker rollout"
+    "Permanent ora8 worker registration and production rollout"
   ],
   "live_followup": {
-    "source_commit": "7d1df70",
+    "source_commit": "9c19148262ada84be1f5d1345afbf8bb43ef9f43",
     "inventory": "docs/proof/LIVE-WORKER-INVENTORY-2026-10-28.json",
     "real_http_oauth": [
       "none",
@@ -106,10 +106,21 @@
       "unsupported-only grant rejection"
     ],
     "scope": "Real HTTP in isolated Lightsprint gateway. No real provider account/browser or desktop update.",
-    "flow": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/7h2g4IzFargW0XpVG5aol.png",
-    "expectations": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/bRzpEIohUwz7BWfdP4Q1X.png",
-    "ora8_actual_run": "blocked by owner Tailscale identity check and local registry access",
+    "flow": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/INN0ZFtf88Wxj36dVeFyy.png",
+    "expectations": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/M8BNeqGoMWLUonXnm9Y9X.png",
+    "ora8_actual_run": "pass: 13 real checks as loopback-lab; listener closed and temporary checkout removed",
     "discovery_tests": 8,
-    "lab_syntax_and_guard": "pass"
+    "lab_syntax_and_guard": "pass",
+    "ora8_result": "docs/proof/ORA8-LAB-RESULT-2026-10-28.json",
+    "expectation_verdicts": {
+      "met": 6,
+      "unverified": 2
+    },
+    "local_suite": {
+      "tests": 225,
+      "result": "pass",
+      "python": "3.11.6"
+    },
+    "renderer_note": "This fresh sandbox lacks flow-diff-render and Chromium. Matplotlib renders the updated source-flow diagram and expectation sheet. The embedded terminal transcript is real; its visual framing is illustrative."
   }
 }

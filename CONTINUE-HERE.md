@@ -1,5 +1,15 @@
 # Continue Loopback here
 
+## Current acceptance — 28 October, 10:56 UTC
+
+The dedicated ora8 lab run now passes all 13 checks at source `9c19148262ada84be1f5d1345afbf8bb43ef9f43`.
+Installation, real OAuth/MCP, password recovery, repeat installation, upgrade, rollback, and cleanup pass.
+All 225 local tests, Ruff, syntax checks, and Bandit medium/high checks pass.
+Read [the saved result](docs/proof/ORA8-LAB-RESULT-2026-10-28.json).
+The owner authorizes a continuation PR on the existing branch. Earlier instructions against a new PR are superseded.
+Desktop deployment, permanent ora8 registration, actual ChatGPT/Claude browser acceptance, and live ngrok acceptance remain open.
+The access-blocker notes below describe the earlier state. Tailscale SSH now works for `loopback-lab`.
+
 Latest source branch: `ls/16-review-handoff-and-update-dashboard-desi-1o9R`.
 Read [the current checkpoint](docs/CONTINUATION-2026-10-28-RESUMED.md) first.
 Read [current proof links](docs/proof/RESUMED-EVIDENCE.json) only when needed.

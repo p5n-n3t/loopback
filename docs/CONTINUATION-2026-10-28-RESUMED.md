@@ -1,5 +1,25 @@
 # Resumed engineering checkpoint — 28 October 2026
 
+## Latest acceptance result — 10:56 UTC
+
+The owner authorizes a continuation PR from the existing branch.
+The reviewed source `9c19148262ada84be1f5d1345afbf8bb43ef9f43` passes the dedicated ora8 lab run.
+The saved [redacted result](proof/ORA8-LAB-RESULT-2026-10-28.json) records all 13 successful checks.
+Fresh installation, real OAuth/MCP for three client methods, recovery login, repeat installation, upgrade, rollback, and shutdown pass.
+The test uses `loopback-lab`, private temporary directories, and IPv4 loopback port 3147.
+An independent check confirms that the listener is closed and the temporary source checkout is removed.
+No production services, routes, credentials, or worker registrations change.
+The first wrapper attempt rejects an incorrect expected revision before installation. The corrected exact-revision run succeeds.
+
+All 225 local tests pass in a fresh Python 3.11 environment.
+Ruff, Python compilation, JavaScript and Bash syntax, and diff checks pass.
+Bandit reports no medium or high findings.
+The previous ora8 identity blocker is resolved for the dedicated lab account.
+Permanent ora8 registration and production rollout remain separate work.
+Actual ChatGPT/Claude browser acceptance and a live ngrok account remain unverified.
+Desktop deployment still needs the owner's normal terminal because the MCP sandbox denies its runtime configuration directory.
+The earlier checkpoint sections below retain their historical validation and limits.
+
 Branch: `ls/16-review-handoff-and-update-dashboard-desi-1o9R`.
 PR 9 is merged as main `66c4891`. This branch imports it in merge commit `e696322`.
 Use `git log -1` for the latest saved continuation commit.
