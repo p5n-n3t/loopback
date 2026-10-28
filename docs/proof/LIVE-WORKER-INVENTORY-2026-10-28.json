@@ -1,0 +1,213 @@
+{
+  "date_utc": "2026-10-28",
+  "method": "Read-only candidate discovery functions executed through existing Loopback SSH targets. No installation, route edit, or worker update.",
+  "excluded": [
+    "ora2",
+    "ora4"
+  ],
+  "collector_tests": 8,
+  "results": [
+    {
+      "target": "ora1",
+      "returncode": 0,
+      "inventory": {
+        "hostname": "ora1",
+        "tailscale": "ok",
+        "routes": [],
+        "cloudflare": "ok",
+        "cloudflare_processes": 0,
+        "listeners": "ok",
+        "listener_ports": [
+          53,
+          80,
+          111,
+          443,
+          888,
+          3031,
+          4545,
+          5432,
+          6722,
+          8012,
+          8065,
+          8080,
+          8443,
+          8444,
+          8886,
+          8888,
+          8898,
+          8990,
+          8991,
+          8992,
+          9083,
+          11235,
+          11434,
+          18480,
+          33419,
+          36173,
+          49632,
+          60398
+        ],
+        "bindings": 1
+      },
+      "error": null
+    },
+    {
+      "target": "ora3",
+      "returncode": 0,
+      "timed_out": false,
+      "inventory": {
+        "hostname": "ora3",
+        "tailscale": "ok",
+        "routes": [],
+        "cloudflare": "ok",
+        "cloudflare_processes": 1,
+        "listeners": "ok",
+        "listener_ports": [
+          53,
+          80,
+          111,
+          443,
+          888,
+          3000,
+          4000,
+          6722,
+          8886,
+          11235,
+          11434,
+          18765,
+          37091,
+          43922,
+          45093,
+          59190
+        ],
+        "bindings": 0
+      },
+      "error": null
+    },
+    {
+      "target": "ora5",
+      "returncode": 0,
+      "timed_out": false,
+      "inventory": {
+        "hostname": "ora5",
+        "tailscale": "ok",
+        "routes": [],
+        "cloudflare": "ok",
+        "cloudflare_processes": 0,
+        "listeners": "ok",
+        "listener_ports": [
+          53,
+          80,
+          111,
+          443,
+          888,
+          3000,
+          6722,
+          8010,
+          8886,
+          11235,
+          11434,
+          34563,
+          34719,
+          43139
+        ],
+        "bindings": 0
+      },
+      "error": null
+    },
+    {
+      "target": "ora6",
+      "returncode": 0,
+      "timed_out": false,
+      "inventory": {
+        "hostname": "ora6",
+        "tailscale": "ok",
+        "routes": [],
+        "cloudflare": "ok",
+        "cloudflare_processes": 1,
+        "listeners": "ok",
+        "listener_ports": [
+          53,
+          80,
+          111,
+          443,
+          888,
+          3000,
+          6722,
+          8780,
+          8886,
+          11434,
+          35471,
+          39061,
+          42893,
+          44301
+        ],
+        "bindings": 0
+      },
+      "error": null
+    },
+    {
+      "target": "ora7",
+      "returncode": -9,
+      "timed_out": true,
+      "inventory": null,
+      "error": ""
+    },
+    {
+      "target": "aws1",
+      "returncode": 0,
+      "timed_out": false,
+      "inventory": {
+        "hostname": "aws1",
+        "tailscale": "ok",
+        "routes": [],
+        "cloudflare": "ok",
+        "cloudflare_processes": 0,
+        "listeners": "ok",
+        "listener_ports": [
+          53,
+          80,
+          443,
+          888,
+          6722,
+          8886,
+          8888,
+          34573,
+          34735,
+          43866,
+          63981
+        ],
+        "bindings": 0
+      },
+      "error": null
+    },
+    {
+      "target": "aws2",
+      "returncode": 0,
+      "timed_out": false,
+      "inventory": {
+        "hostname": "aws2",
+        "tailscale": "ok",
+        "routes": [],
+        "cloudflare": "ok",
+        "cloudflare_processes": 0,
+        "listeners": "ok",
+        "listener_ports": [
+          53,
+          80,
+          443,
+          888,
+          4000,
+          6722,
+          8886,
+          34979,
+          36939,
+          40621,
+          42643
+        ],
+        "bindings": 0
+      },
+      "error": null
+    }
+  ]
+}

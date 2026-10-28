@@ -12,7 +12,7 @@
     "6:1836": "404 (light) - Desktop"
   },
   "assets": {
-    "wordmark": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/mZnvkqIch_h_x3M0nEWyl.png",
+    "wordmark": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/JakyxEgh4K-gr9TRB4VkN.png",
     "symbol": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/NkkqcpcALQ_FMecD2aRwM.png",
     "light_reference_1_883": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/jyo3jEBGfKl87ifijWY2c.png",
     "dark_reference_6_224": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/J5812-YvIRr1Mh4N9Ft-8.png"
@@ -91,5 +91,15 @@
     ]
   },
   "interpretation": "Reference roots are landing and 404 frames with an embedded application illustration. Adapt their spacing, typography, buttons, and navigation to a functional dashboard. Do not replace dashboard functions with a marketing page. User requests restrained logo gradients.",
-  "asset_policy": "Use hosted raster URLs directly. Do not commit raster exports or temporary Figma URLs. Prefer existing code-native SVG icons with appropriate license and brand treatment."
+  "asset_policy": "Use hosted raster URLs directly. Do not commit raster exports or temporary Figma URLs. Prefer existing code-native SVG icons with appropriate license and brand treatment.",
+  "wordmark_export": {
+    "node": "31:188",
+    "date_utc": "2026-10-28",
+    "dimensions_px": [
+      1029,
+      377
+    ],
+    "scale": 2,
+    "note": "Fresh successful export after reconnection. Earlier file metadata describes the initial survey."
+  }
 }

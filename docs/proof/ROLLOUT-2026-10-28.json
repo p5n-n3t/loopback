@@ -1,0 +1,81 @@
+{
+  "tested_source": "41a7c0fa2b46ed4925e8146390e5b0290192c322",
+  "observed_at_utc": "2026-10-28T15:57:04.766Z",
+  "desktop": {
+    "installation": "owner applied supported local updater from the prepared source checkout",
+    "python": "3.13.14",
+    "owner_doctor": "no errors",
+    "sandbox": "landlock active",
+    "local_health_http": 200,
+    "oauth_auth_methods": [
+      "none",
+      "client_secret_basic",
+      "client_secret_post"
+    ],
+    "public_health_with_descriptive_loopback_user_agent": 200,
+    "public_oauth_metadata_with_descriptive_loopback_user_agent": 200,
+    "public_health_with_python_default_user_agent": {
+      "status": 403,
+      "cloudflare_code": 1010
+    },
+    "public_user_agent_note": "Matched requests differed only by User-Agent. No Cloudflare setting changed."
+  },
+  "worker": {
+    "hostname": "ora8",
+    "uid": 1002,
+    "source_hashes": {
+      "node_agent.py": "56c6e027474265bcf0b42691a098de35d0d6334800b7d53c063a73239063dce3",
+      "worker_bridge.py": "6144bcc05ed7ae0465d24d0decb59cc98b33c43be38c5b742e74d5f525f85514",
+      "auth.py": "7fca51f5ff16fe4f82525884306aedceee645b831baa83fdc3142c092553da17",
+      "auth_http.py": "e9bc938ca7dec673a2ce156e77e2a7eb1e10ce2799b7361798a17f66d2aebc5e",
+      "context.py": "d011ea76a0b29d05333af805a680e1a7fbe3b3b3927aa3400fb446d269f62309",
+      "bootstrap.py": "0fbe103c0e328c7b5820646e8430e33d1039e5694233fb70cd2629c950f4db68",
+      "config.py": "5c0763511ef506e67076c205db85c95b8a00f596e6cae521c34c5e45fc5845a7",
+      "identity.py": "aea7e1e1c8bc8f9588d8c15f8e59e00001aa1ac2c534b50189db302d5864eb84",
+      "version.py": "f98171cf0000c0ee5f9a8a27501eff815dcc2055a3618c6041518d783681654c",
+      "policy.py": "3ac5c82249786bba582228050bd171ea9a96b48eaf29f127be57b3b483dc12de",
+      "sandbox.py": "99dde7fe4bb0229867b3c5c08f4499063c3703209c086f2a03af48275d2e1cb6",
+      "audit.py": "538e9cc34d5702109b2420f21e9f4614ff522ffe67848b1f537a265713965463"
+    },
+    "setup_ok": true,
+    "metrics": {
+      "sampled_at": 1793203024.7662938,
+      "interval_seconds": 2.01,
+      "cpu_count": 4,
+      "cpu_percent": 0.25,
+      "memory_total_bytes": 25136533504,
+      "memory_used_bytes": 1869930496,
+      "memory_percent": 7.44,
+      "rx_bytes_per_second": 489.6,
+      "tx_bytes_per_second": 299.9,
+      "managed_process_count": 0,
+      "binding_count": 0
+    },
+    "discovery": {
+      "observed_at": 1793203024.7663436,
+      "hostname": "ora8",
+      "tailscale_status": "ok",
+      "dns_name": "ora8.bigeye-escalator.ts.net",
+      "tailscale_routes": [],
+      "cloudflared_status": "ok",
+      "cloudflared_process_count": 0,
+      "listeners_status": "ok",
+      "listener_count": 19,
+      "binding_count": 0
+    }
+  },
+  "limits": [
+    "Worker hashes establish the installed runtime. They do not establish a running MCP service.",
+    "Ora8 has zero configured bindings and zero managed processes.",
+    "Discovery reports the SSH account's observable namespace, not every possible host or account.",
+    "Only ora8 worker deployment is verified. Other workers require separate rollout verification.",
+    "Real ChatGPT/Claude browser consent and refresh remain unverified.",
+    "Live ngrok account and public transport remain unverified.",
+    "Desktop source attribution uses the owner's upgrade log and prepared checkout. Protected runtime files were not read."
+  ],
+  "source_matches": {
+    "file_count": 12,
+    "all_match_reviewed_source": true
+  },
+  "documentation": "https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1010/"
+}

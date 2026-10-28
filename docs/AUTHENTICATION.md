@@ -12,6 +12,8 @@ authenticated caller is then allowed to do, see
 |---|---|---|---|
 | OAuth access/refresh token | MCP clients that support OAuth 2.1 | `/oauth/token` after an authorization-code + PKCE flow | Whatever the client requested and the grant allows, never `loopback:admin` |
 | API token (`lbk_<id>_<secret>`) | MCP clients that only support a static bearer header | Dashboard, or `loopback auth token create` | Chosen at creation, never `loopback:admin` |
+| Connector setup key (`lbs_…`) | Human approval of additional OAuth clients | Installer or Authentication dashboard | Consent only, no direct dashboard or MCP access |
+| Dashboard username/password | Human administrator | Installer or Authentication dashboard | Dashboard login and explicit OAuth consent |
 | Machine token | Local bootstrap and recovery | Generated at install; `loopback auth rotate-machine-token` | Full local access; a recovery/admin-adjacent credential, not a per-client one |
 | Dashboard session cookie | A human administrator | `/admin/login` | Admin API only, not the MCP endpoint |
 
@@ -21,6 +23,38 @@ a fresh install and to recover access if everything else is locked out —
 treat it like a recovery code, not a day-to-day credential. Whether the
 machine token is additionally accepted directly on `/mcp` is controlled by
 `auth.legacy_machine_token_mcp` (off by default on a fresh v4 install).
+
+## Dashboard account and connector setup
+
+Fresh installation generates a random dashboard username and password and a separate
+connector setup key. The installer displays these once. The database stores hashes,
+not recoverable copies. Save them in your password manager. The machine token remains
+available locally through `loopback token` for recovery.
+
+Existing dashboard passwords keep working without a username. Upgrades do not reset
+passwords, API tokens, or OAuth grants. In Authentication, use **Dashboard account**
+to set or change the username and password. This action requires the current password
+or machine token and signs out every dashboard session. The older password-change
+and CLI enrollment paths retain an existing username.
+
+The connector setup key (`lbs_…`) authorizes OAuth consent. It cannot sign in to the
+dashboard, access its API, or call MCP tools as a bearer credential. To enroll an
+OAuth client, add your Loopback MCP URL in the client, choose OAuth, check the client
+name, redirect URI and scopes on Loopback's consent page, enter the setup key, and
+approve. Repeat for additional clients with the same key. PKCE, resource checks,
+request expiry, explicit consent, and per-client tokens still apply. You can also
+approve with your dashboard username/password or the local recovery token.
+
+In Authentication, **Create/Rotate setup key** requires the current password or
+machine token and shows the new key once. The old key immediately stops authorizing
+new approvals. Rotation does **not** revoke existing OAuth grants, API tokens, or
+dashboard sessions. Revoke an OAuth grant to stop its access and refresh tokens, or
+revoke a client to remove all its grants. For a compromised setup key, rotate it and
+review/revoke unfamiliar clients and grants separately. For bearer-only clients,
+create a separate scoped API token as before.
+
+These flows have local contract tests. They do not establish that an actual ChatGPT
+or Claude account completes its provider-specific connector flow.
 
 ## Scopes
 
@@ -91,6 +125,21 @@ not register is refused with `unauthorized_client`. The authorization server
 metadata advertises all three auth methods for both endpoints. Rotate a secret
 with `AuthStore.rotate_client_secret(client_id)`; the dashboard client list shows
 each client's auth method and grants.
+
+### CIMD authentication methods
+
+CIMD clients can list alternatives in `token_endpoint_auth_methods_supported`.
+Loopback selects `none` when that list contains it. The singular
+`token_endpoint_auth_method` expresses a preference when alternatives exist.
+This permits ChatGPT's document to prefer `private_key_jwt` and offer `none`.
+See [OpenAI's CIMD authentication contract](https://developers.openai.com/plugins/build/auth).
+
+The alternatives must form a nonempty array of nonempty strings.
+Loopback rejects a CIMD document that offers no shared public method.
+Without an alternatives field, the singular method retains its existing behavior.
+DCR retains its singular registration contract. Loopback does not support JWT
+client assertions and rejects them at the token and revocation endpoints.
+PKCE, exact redirect matching, resource checks, and explicit consent still apply.
 
 ## Authorization code + PKCE
 

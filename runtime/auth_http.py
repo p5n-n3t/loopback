@@ -116,7 +116,7 @@ _STYLE = """
 body::before{content:"";position:fixed;inset:auto -20vw -30vh auto;width:60vw;height:60vh;background:var(--grad);opacity:.08;filter:blur(80px);pointer-events:none}
 .card{position:relative;width:min(440px,100%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:32px 28px 26px;box-shadow:0 20px 60px #0000000f}
 .brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;letter-spacing:0;font-size:12px;font-weight:600;color:var(--muted)}
-.brand img{display:block}.brand .symbol{width:36px;height:36px}.brand .wordmark{height:18px;width:auto}.brand .ctx{margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+.brand img{display:block}.brand .symbol{width:36px;height:36px}.brand .wordmark{height:32px;width:auto}.brand .ctx{margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
 h1{font-size:22px;letter-spacing:-.5px;margin:0 0 6px;font-weight:700}h1::after{content:"";display:block;width:28px;height:3px;border-radius:3px;background:var(--grad);margin-top:8px}
 p{color:var(--muted);margin:6px 0 14px}
 label{display:block;font-size:12px;font-weight:600;margin:14px 0 6px;color:var(--muted)}input{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit}
@@ -133,13 +133,13 @@ button.secondary{background:transparent;color:var(--muted);border-color:var(--li
 """
 
 BRAND_SYMBOL = "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/NkkqcpcALQ_FMecD2aRwM.png"
-BRAND_WORDMARK = "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/mZnvkqIch_h_x3M0nEWyl.png"
+BRAND_WORDMARK = "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/JakyxEgh4K-gr9TRB4VkN.png"
 
 
 def _brand(context: str = "") -> str:
     ctx = f'<span class="ctx">{html.escape(context)}</span>' if context else ""
     return (f'<div class="brand" data-testid="brand"><img class="symbol" src="{BRAND_SYMBOL}" alt="" width="36" height="36">'
-            f'<img class="wordmark" src="{BRAND_WORDMARK}" alt="Loopback" height="18">{ctx}</div>')
+            f'<img class="wordmark" src="{BRAND_WORDMARK}" alt="Loopback" height="32">{ctx}</div>')
 
 
 def _page(title: str, body: str) -> str:
@@ -158,10 +158,11 @@ def render_worker_connection(name: str, endpoint: str) -> str:
 
 def render_login(host: str, error: str = "", next_path: str = "/admin", password_set: bool = True) -> str:
     err = f'<div class="err">{html.escape(error)}</div>' if error else ""
-    hint = ("Sign in with your dashboard password." if password_set
+    hint = ("Sign in with your dashboard username and password. Older installations can leave the username empty until they set one. Use the machine token for recovery." if password_set
             else "No dashboard password is set yet. Run <code>loopback auth enroll</code> on this machine to open the one-time setup link, or sign in with the machine token for recovery.")
     return _page("Loopback · Sign in", f"""{_brand("Dashboard")}<h1>Sign in</h1><p>{hint}</p>{err}
 <form method="post" action="/admin/login" autocomplete="off"><input type="hidden" name="next" value="{html.escape(next_path, quote=True)}">
+<label for="username">Dashboard username</label><input id="username" name="username" autocomplete="username">
 <label for="credential">Password or machine token</label><input id="credential" type="password" name="credential" autocomplete="current-password" autofocus required>
 <button>Open dashboard</button></form><div class="small">Dashboard address: <code>{html.escape(host)}</code></div>""")
 
@@ -182,9 +183,9 @@ def render_consent(*, client_name: str, redirect_uri: str, scopes: list[str], ho
     err = f'<div class="err">{html.escape(error)}</div>' if error else ""
     scope_items = "".join(f"<li><code>{html.escape(s)}</code> — {html.escape(SCOPES.get(s, ''))}</li>" for s in scopes)
     cred = ("" if not need_credential else
-            '<label for="credential">Dashboard password or machine token</label><input id="credential" type="password" name="credential" autocomplete="current-password" required>')
+            '<label for="username">Dashboard username (for password sign-in)</label><input id="username" name="username" autocomplete="username"><label for="credential">Connector setup key, dashboard password, or machine token</label><input id="credential" type="password" name="credential" autocomplete="current-password" required>')
     return _page("Loopback · Authorize", f"""{_brand("Authorization")}<h1>Authorize {html.escape(client_name)}</h1>
-<p>The client will receive a short-lived OAuth credential scoped to this Loopback instance. Your password and machine token are never shared with it.</p>{err}
+<p>The client will receive a short-lived OAuth credential scoped to this Loopback instance. Your setup key, password, and machine token are never shared with it. Reuse the connector setup key here to authorize additional clients. Review the redirect and scopes before you approve.</p>{err}
 <div class="meta"><b>Client</b><span>{html.escape(client_name)}</span><b>Redirect</b><span>{html.escape(redirect_uri)}</span><b>Resource</b><span>{html.escape(host)}</span></div>
 <ul class="scopes">{scope_items}</ul>
 <form method="post" action="/oauth/authorize" autocomplete="off"><input type="hidden" name="request_id" value="{html.escape(request_id, quote=True)}"><input type="hidden" name="csrf" value="{html.escape(csrf, quote=True)}">{cred}
@@ -300,6 +301,8 @@ def authenticate_client(ctx: AppContext, request: Request, form: Any) -> dict[st
     checked in constant time before any code or refresh token is consumed, so a failed
     attempt never burns a grant. Raises ``ClientAuthFailure`` (→ 401 ``invalid_client``).
     """
+    if "client_assertion" in form or "client_assertion_type" in form:
+        raise ClientAuthFailure("client assertions are not supported; use the registered authentication method", method="private_key_jwt")
     basic = _basic_credentials(request)
     form_id = str(form.get("client_id") or "")
     form_secret = str(form.get("client_secret") or "")
@@ -438,7 +441,8 @@ def routes(ctx: AppContext) -> list[Route]:
         credential = str(form.get("credential") or "")
         need_cred = session is None or bool(ctx.config.data.get("auth", {}).get("require_password_for_consent", True))
         if need_cred:
-            method = ctx.auth.verify_admin_credential(credential)
+            method = ("connector-key" if ctx.auth.verify_connector_key(credential) else
+                      ctx.auth.verify_dashboard_login(str(form.get("username") or ""), credential))
             if not method:
                 locked = ctx.auth.limiter.failure("login", ip)
                 ctx.auth.record_event("oauth_consent_bad_credential", params["client_id"], ip, {"locked": locked})
@@ -446,7 +450,7 @@ def routes(ctx: AppContext) -> list[Route]:
                 rid2, csrf2 = ctx.auth.stash_authz_request(params)
                 return HTMLResponse(render_consent(client_name=client["client_name"], redirect_uri=redirect_uri, scopes=params["scope"].split(),
                                                    host=params["resource"], request_id=rid2, csrf=csrf2, need_credential=True,
-                                                   error="Invalid password or machine token."), status_code=401, headers=NO_STORE)
+                                                   error="Invalid credentials or connector setup key."), status_code=401, headers=NO_STORE)
             ctx.auth.limiter.success("login", ip)
         code = ctx.auth.create_code(client_id=params["client_id"], redirect_uri=redirect_uri, code_challenge=params["code_challenge"],
                                     resource=params["resource"], scope=params["scope"])
@@ -557,7 +561,7 @@ def routes(ctx: AppContext) -> list[Route]:
             return HTMLResponse(render_login(host, "Too many failed attempts. Try again in 15 minutes.", password_set=ctx.auth.has_password()), status_code=429, headers=NO_STORE)
         form = await request.form()
         credential = str(form.get("credential") or form.get("token") or "")
-        method = ctx.auth.verify_admin_credential(credential)
+        method = ctx.auth.verify_dashboard_login(str(form.get("username") or ""), credential)
         if not method:
             locked = ctx.auth.limiter.failure("login", ip)
             ctx.auth.record_event("login_failed", None, ip, {"locked": locked})

@@ -308,7 +308,30 @@ def metrics(root, controller_pid=None):
 
 
 # --------------------------------------------------------------------------- read-only discovery
-SECRET_ARG = re.compile(r'(--token|--credentials-file|--origincert|token=)\S*', re.I)
+SECRET_ARG = re.compile(r'token=\S*', re.I)
+SECRET_FLAGS = ('--token', '--token-file', '--credentials-file', '--credentials-contents', '--origincert')
+
+
+def _safe_cloudflared_args(args):
+    """Redact credential values in cloudflared argv without hiding config paths."""
+    safe = []
+    redact_next = False
+    for arg in args:
+        if redact_next:
+            safe.append('<redacted>')
+            redact_next = False
+            continue
+        flag = next((flag for flag in SECRET_FLAGS if arg.lower() == flag), None)
+        if flag:
+            safe.append(flag)
+            redact_next = True
+            continue
+        inline_flag = next((flag for flag in SECRET_FLAGS if arg.lower().startswith(flag + '=')), None)
+        if inline_flag:
+            safe.append(inline_flag + '=<redacted>')
+            continue
+        safe.append(SECRET_ARG.sub('token=<redacted>', arg))
+    return safe
 
 
 def _hex_addr(value):
@@ -392,7 +415,7 @@ def cloudflared_processes():
             args = [a.decode('utf-8', 'replace') for a in args if a]
         except OSError:
             continue
-        safe = [SECRET_ARG.sub(r'\1=<redacted>', a) for a in args[1:]]
+        safe = _safe_cloudflared_args(args[1:])
         config = None
         for i, a in enumerate(safe):
             if a == '--config' and i + 1 < len(safe):

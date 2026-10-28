@@ -74,6 +74,42 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual([r["provider"] for r in host["routes"]], ["cloudflare", "cloudflare"])
 
 
+class CloudflaredDiscoveryTests(unittest.TestCase):
+    def test_cloudflared_process_args_redact_split_and_inline_secrets(self):
+        real_path = Path
+        with tempfile.TemporaryDirectory() as temp:
+            root = real_path(temp)
+            proc = root / "proc" / "1234"
+            proc.mkdir(parents=True)
+            (proc / "comm").write_text("cloudflared\n")
+            config = root / "safe-config.yml"
+            config.write_text("tunnel: example-tunnel\n")
+            secrets = ["SPLIT_TOKEN_SECRET", "/secret/token-file", "/secret/credentials-file",
+                       "INLINE_TOKEN_SECRET", "/secret/inline-token-file", "/secret/inline-credentials",
+                       "INLINE_CREDENTIALS_SECRET", "/secret/origin-cert"]
+            argv = ["cloudflared", "tunnel", "--token", secrets[0], "--token-file", secrets[1],
+                    "--credentials-file", secrets[2], "--token=" + secrets[3],
+                    "--token-file=" + secrets[4], "--credentials-file=" + secrets[5],
+                    "--credentials-contents=" + secrets[6], "--origincert", secrets[7],
+                    "--config", str(config), "run"]
+            (proc / "cmdline").write_bytes(b"\0".join(arg.encode() for arg in argv) + b"\0")
+
+            def proc_path(value):
+                path = real_path(value)
+                return root / "proc" if str(path) == "/proc" else path
+
+            with patch.object(node_agent, "Path", side_effect=proc_path):
+                result = node_agent.cloudflared_processes()
+
+        self.assertEqual(len(result), 1)
+        entry = result[0]
+        self.assertEqual(entry["config_file"], str(config))
+        self.assertIn("--config " + str(config), entry["args"])
+        for secret in secrets:
+            self.assertNotIn(secret, str(result))
+        self.assertIn("example-tunnel", str(result))
+
+
 class ServiceTests(unittest.TestCase):
     def setUp(self):
         self.calls: list[str] = []

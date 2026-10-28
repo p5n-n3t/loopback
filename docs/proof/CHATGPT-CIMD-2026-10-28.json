@@ -1,0 +1,63 @@
+{
+  "comparison": {
+    "branch_merge_base": "66c4891",
+    "previous_head": "189e4e1",
+    "new": "CIMD correction working tree"
+  },
+  "metadata_source": "https://chatgpt.com/oauth/client.json",
+  "documentation": "https://developers.openai.com/plugins/build/auth",
+  "public_metadata": {
+    "client_id": "https://chatgpt.com/oauth/client.json",
+    "client_name": "ChatGPT",
+    "redirect_uris": [
+      "https://chatgpt.com/connector_platform_oauth_redirect"
+    ],
+    "token_endpoint_auth_method": "private_key_jwt",
+    "token_endpoint_auth_methods_supported": [
+      "none",
+      "private_key_jwt"
+    ],
+    "grant_types": [
+      "authorization_code",
+      "refresh_token"
+    ],
+    "response_types": [
+      "code"
+    ],
+    "jwks_uri": "https://chatgpt.com/oauth/jwks.json"
+  },
+  "tests": {
+    "suite": 230,
+    "result": "pass",
+    "cimd_and_oauth_contracts": 20,
+    "ruff": "pass",
+    "compile": "pass",
+    "bandit_high_severity": "pass"
+  },
+  "runtime": {
+    "public_metadata_offer": [
+      "none",
+      "private_key_jwt"
+    ],
+    "live_cimd_consent_http": 200,
+    "stored_auth_method": "none",
+    "assertion_rejected_before_code_consumption": 401,
+    "code_exchange_http": 200,
+    "refresh_http": 200,
+    "mcp_tools_http": 200,
+    "mcp_tool_count": 40,
+    "revoke_http": 200,
+    "revoked_refresh_http": 400
+  },
+  "limits": [
+    "Isolated gateway and seeded consent credential, not the owner desktop.",
+    "Actual ChatGPT account authorization and callback remain unverified.",
+    "Desktop source 41a7c0f needs the supported updater before retry.",
+    "No private_key_jwt authentication support is added."
+  ],
+  "tested_source_hashes": {
+    "runtime/auth.py": "27727d767e45495d31599e9c796c68745b2c1acc11ba930a5ba4dc9af14aeea2",
+    "runtime/auth_http.py": "421bf73f3b261a23eea7c45751dec8ff8038194e5eb7bb9bb3b8a648dc72bd1d",
+    "tests/test_oauth_clients.py": "29dc2ede165a24830e410fca25ff2ad4d30177dbae42d85427ad61ff52d6185d"
+  }
+}

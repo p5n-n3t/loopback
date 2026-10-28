@@ -1,0 +1,148 @@
+{
+  "date_utc": "2026-10-28",
+  "source_commit": "e9dbb73",
+  "scope": "Isolated real application, test account and consent client. No production rollout, real provider sign-in, or live ngrok account is verified.",
+  "capture_attempts": 12,
+  "capture_failures": 0,
+  "videos": 0,
+  "screenshots": [
+    {
+      "label": "Login \u2014 Dashboard Account Mobile",
+      "path": "/admin/login",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/wkMC6slTxr-uC3fu3M4xN.png",
+      "status": "ok"
+    },
+    {
+      "label": "Authentication \u2014 Account And Setup Key",
+      "path": "/admin#/auth",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/YAqXB92RgEx40GUSx9tOz.png",
+      "status": "ok"
+    },
+    {
+      "label": "Public Tunnels \u2014 Fixed Ngrok Configuration",
+      "path": "/admin#/cloudflare",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/yxzpcFl2fVSubrK5aJ--m.png",
+      "status": "ok"
+    },
+    {
+      "label": "Setup \u2014 Exposure Choices",
+      "path": "/admin#/welcome?step=1",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/j941C40Hl-KnRMSCcpc9A.png",
+      "status": "ok"
+    },
+    {
+      "label": "OAuth \u2014 Consent With Setup Key",
+      "path": "/oauth/authorize (sandbox fixture)",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/xsklUYhPxxWN4OSV8RduV.png",
+      "status": "ok"
+    },
+    {
+      "label": "Services \u2014 Edit Focus And Recovery",
+      "path": "/admin#/services?edit=recovery-demo",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/pKpYz-PPzp9GIpbuxFvC7.png",
+      "status": "ok"
+    }
+  ],
+  "remaining_proof": [],
+  "historical_delivery": [
+    {
+      "label": "Migration Handoff \u2014 Document Expectations",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/S3eih2vSXWCfu_AgfMndz.png"
+    },
+    {
+      "label": "Loopback \u2014 Migration Handoff",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/Jc8Ux0WxGwIwzR6VclJcq.png"
+    }
+  ],
+  "capture_note": "Six initial captures plus one six-view refresh required by the latest wordmark source change. Zero retries and zero videos.",
+  "flow_charts": [
+    {
+      "label": "Account Setup \u2014 Verified Flow",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/qgCJx1kCTzCUw1Az3oMdS.png"
+    },
+    {
+      "label": "Ngrok Lifecycle \u2014 Verified Flow",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/rcNwhKt5-SWy9vgtr1pwa.png"
+    },
+    {
+      "label": "Installation \u2014 Verified Flow",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/qgWiPMCuomS-wWhf0FDh3.png"
+    }
+  ],
+  "expectations": {
+    "label": "CLI And Installer \u2014 Expectations",
+    "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/w8_5B1i9D-zzLd1nH_QN6.png",
+    "met": 6,
+    "unverified": [
+      "Owner terminal rendering and desktop rollout"
+    ],
+    "evidence_revision": "e9dbb73",
+    "source_links": [
+      "https://github.com/p5n-n3t/loopback/blob/e9dbb73/runtime/cli.py#L182",
+      "https://github.com/p5n-n3t/loopback/blob/e9dbb73/tests/test_installer_workflows.py#L66"
+    ],
+    "render_note": "Real CLI help/report output with labelled sample data in illustrative HTML. No app route renders terminal UI."
+  },
+  "open_acceptance": [
+    "Actual ChatGPT and Claude registration, consent, refresh and reconnect",
+    "Live ngrok account and end-to-end public transport",
+    "Rollout verification for production workers other than ora8",
+    "A real ora8 MCP binding and public transport, if requested"
+  ],
+  "live_followup": {
+    "source_commit": "9c19148262ada84be1f5d1345afbf8bb43ef9f43",
+    "inventory": "docs/proof/LIVE-WORKER-INVENTORY-2026-10-28.json",
+    "real_http_oauth": [
+      "none",
+      "client_secret_basic",
+      "client_secret_post"
+    ],
+    "http_checks": [
+      "DCR with mixed-grant narrowing",
+      "PKCE consent and token exchange",
+      "wrong Basic secret rejection",
+      "refresh",
+      "nonempty MCP tools/list result",
+      "unsupported-only grant rejection"
+    ],
+    "scope": "Real HTTP in isolated Lightsprint gateway. No real provider account/browser or desktop update.",
+    "flow": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/INN0ZFtf88Wxj36dVeFyy.png",
+    "expectations": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/M8BNeqGoMWLUonXnm9Y9X.png",
+    "ora8_actual_run": "pass: 13 real checks as loopback-lab; listener closed and temporary checkout removed",
+    "discovery_tests": 8,
+    "lab_syntax_and_guard": "pass",
+    "ora8_result": "docs/proof/ORA8-LAB-RESULT-2026-10-28.json",
+    "expectation_verdicts": {
+      "met": 6,
+      "unverified": 2
+    },
+    "local_suite": {
+      "tests": 225,
+      "result": "pass",
+      "python": "3.11.6"
+    },
+    "renderer_note": "This fresh sandbox lacks flow-diff-render and Chromium. Matplotlib renders the updated source-flow diagram and expectation sheet. The embedded terminal transcript is real; its visual framing is illustrative."
+  },
+  "rollout": {
+    "source_commit": "41a7c0fa2b46ed4925e8146390e5b0290192c322",
+    "result": "docs/proof/ROLLOUT-2026-10-28.json",
+    "desktop": "Owner updater and doctor succeed. Runtime diagnostics, health and OAuth metadata verified.",
+    "ora8": "All 12 source hashes match. Setup, measured telemetry and read-only discovery succeed. No configured bindings.",
+    "cloudflare": "Default Python user-agent receives error 1010; descriptive Loopback user-agent returns 200. No policy changes.",
+    "verification": {
+      "label": "Rollout \u2014 Desktop And Ora8",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/JDRTeSsykbznY9awMmh0v.png",
+      "met": 6,
+      "unverified": 3
+    }
+  },
+  "cimd_correction": {
+    "result": "docs/proof/CHATGPT-CIMD-2026-10-28.json",
+    "suite": 230,
+    "contracts": 20,
+    "visual": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/RqAGebhzTqd79zT5Fs08G.png",
+    "flow": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/v0G6D4NgrWVQvGA4HblOx.png",
+    "scope": "Real ChatGPT public metadata fetched by isolated gateway. Seeded consent credential. Actual owner ChatGPT callback and desktop deployment remain open.",
+    "rendering": "Server-side screenshots. Local Mermaid charts and an illustrative HTML expectation sheet."
+  }
+}

@@ -1,3 +1,5 @@
+> Latest continuation: [resumed engineering checkpoint](../CONTINUATION-2026-10-28-RESUMED.md). Start there. This file is historical context.
+
 # Start here — portable Loopback continuation
 
 Read this file first. Do not load all historical documents or screenshots.

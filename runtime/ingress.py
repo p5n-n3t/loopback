@@ -1,9 +1,10 @@
-"""Ingress management: Tailscale Serve/Funnel and Cloudflare Tunnel.
+"""Ingress management: Tailscale Serve/Funnel, Cloudflare Tunnel and ngrok.
 
 Exposure model (stated explicitly, never softened):
 
 * Tailscale ``serve``  -> exposure ``tailnet`` (private, governed by tailnet ACLs).
 * Tailscale ``funnel`` -> exposure ``public`` (anyone on the internet).
+* ngrok                -> exposure ``public`` with a fixed account hostname.
 * Cloudflare Tunnel    -> exposure ``public`` unless ``access_policy`` is
   ``cloudflare-access`` (then ``access-protected``). A tunnel is never private.
 
@@ -32,6 +33,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from ngrok_provider import NgrokMixin
 from typing import Any
 
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
@@ -239,7 +241,8 @@ def parse_serve_status(data: Any, https_port: int, local_port: int) -> dict[str,
 
 
 # --------------------------------------------------------------------------- manager
-class IngressManager:
+
+class IngressManager(NgrokMixin):
     """Status, apply, diagnostics and process management for ingress paths."""
 
     def __init__(self, ctx: Any):
@@ -647,6 +650,11 @@ class IngressManager:
 
     def restart(self, name: str) -> dict[str, Any]:
         """Restart an ingress path: 'cloudflare' (process) or 'tailscale' (re-apply handler)."""
+        if name == "ngrok":
+            cfg = self._cfg("ngrok")
+            if not cfg.get("enabled"):
+                raise IngressError("ngrok ingress is not enabled")
+            return self.apply_ngrok(True, confirm_public=True)
         if name == "cloudflare":
             if not self._cfg("cloudflare").get("enabled"):
                 raise IngressError("Cloudflare ingress is not enabled")
@@ -879,19 +887,24 @@ class IngressManager:
         return {
             "local": {"enabled": bool(local.get("enabled", True)), "url": f"http://127.0.0.1:{self.local_port}",
                       "bind": (self.ctx.config.data or {}).get("bind"), "exposure": "local"},
+            "ngrok": self.ngrok_status(check_health=check_health),
             "cloudflare": self.cloudflare_status(check_health=check_health),
             "tailscale": self.tailscale_status(check_health=check_health),
         }
 
     def ensure_started(self) -> dict[str, Any]:
-        """Server-start hook: launch cloudflared if enabled and not running. Never raises."""
-        try:
-            if self._cfg("cloudflare").get("enabled") and not self.cloudflared_pid():
-                return self.start_cloudflare()
-            return {"ok": True, "action": "none"}
-        except Exception as exc:  # noqa: BLE001
-            self._last_error["cloudflare"] = _clip(str(exc), 300)
-            return {"ok": False, "error": self._last_error["cloudflare"]}
+        """Start each configured owned agent. Never change external ingress routes."""
+        results = {}
+        for name, start in (("cloudflare", self.start_cloudflare), ("ngrok", self.start_ngrok)):
+            if not self._cfg(name).get("enabled"):
+                continue
+            try:
+                results[name] = start()
+            except Exception as exc:  # noqa: BLE001
+                self._last_error[name] = _clip(str(exc), 300)
+                results[name] = {"ok": False, "error": self._last_error[name]}
+        errors = [r.get("error") or "Ingress agent failed to start" for r in results.values() if not r.get("ok")]
+        return {"ok": not errors, "providers": results, **({"error": "; ".join(errors)} if errors else {})}
 
     # ---------------------------------------------------------------- diagnostics
     def _local_port_check(self) -> dict[str, Any]:
@@ -905,6 +918,11 @@ class IngressManager:
 
     def diagnostics(self, name: str) -> list[dict[str, Any]]:
         """Human-readable checks ``[{name, ok, detail, fix}]`` for 'cloudflare' or 'tailscale'."""
+        if name == "ngrok":
+            status = self.ngrok_status(False)
+            return [{"name": "ngrok installed", "ok": status["installed"], "detail": "Official ngrok agent required"},
+                    {"name": "Owned process", "ok": status["running"], "detail": status["status"]},
+                    {"name": "Stable hostname", "ok": bool(status["hostname"]), "detail": status["hostname"] or "Configure your reserved ngrok hostname"}]
         if name == "cloudflare":
             return self._cloudflare_diagnostics()
         if name == "tailscale":

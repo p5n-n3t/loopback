@@ -82,6 +82,7 @@ def die(msg: str, code: int = 1) -> NoReturn:  # type: ignore[name-defined]  # n
 
 
 _SECRET_RES = [
+    re.compile(r"lbs_[A-Za-z0-9_\-]+"),
     re.compile(r"lbk_[A-Za-z0-9]+_[A-Za-z0-9_\-]+"),
     re.compile(r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"),
     re.compile(r"\b[0-9a-fA-F]{64}\b"),
@@ -180,11 +181,16 @@ class Report:
 
     def step(self, name: str, ok: bool | None, detail: str = "", *, level: str = "error", fix: str = "") -> bool:
         mark = OK_MARK if ok else (WARN_MARK if ok is None or level != "error" else FAIL_MARK)
-        line = f"{mark} {name}"
+        elapsed = max(0, int(time.time() - self.data["started_at"]))
+        step_number = len(self.data["steps"]) + 1
+        tone = "32" if ok else ("33" if ok is None or level != "error" else "31")
+        if getattr(sys.stdout, "isatty", lambda: False)() and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb":
+            mark = f"\033[{tone}m{mark}\033[0m"
+        line = f"[{step_number:02d}] {mark} {name}"
         if detail:
             line += f" - {redact(detail)}"
         if not self.quiet:
-            say(line)
+            say(f"{line}  ({elapsed}s elapsed)")
             if fix and not ok:
                 say(f"    fix: {fix}")
         self.data["steps"].append({"name": name, "ok": ok, "level": level, "detail": redact(detail)[:2000],
@@ -953,7 +959,7 @@ def print_checks(checks: list[dict[str, Any]]) -> int:
 
 
 # =============================================================== install
-INGRESS_CHOICES = ("local", "tailscale", "cloudflare", "both")
+INGRESS_CHOICES = ("local", "tailscale", "cloudflare", "both", "ngrok")
 
 
 def refuse_root(allow_root: bool) -> None:
@@ -982,20 +988,32 @@ def ask_install_questions(args: argparse.Namespace) -> None:
             say("  2) Tailscale         (tailnet-only Serve, or public Funnel)")
             say("  3) Cloudflare Tunnel (custom domain)")
             say("  4) Both Cloudflare and Tailscale")
+            say("  5) ngrok             (public HTTPS, stable hostname and existing agent config)")
+            say("Mesh access connects your computers. These choices expose this MCP endpoint.")
             try:
                 choice = input("> ").strip() or "1"
             except EOFError:
                 choice = "1"
-            args.ingress = {"1": "local", "2": "tailscale", "3": "cloudflare", "4": "both"}.get(choice, choice)
+            args.ingress = {"1": "local", "2": "tailscale", "3": "cloudflare", "4": "both", "5": "ngrok"}.get(choice, choice)
             if args.ingress not in INGRESS_CHOICES:
                 die(f"invalid choice: {choice}", 2)
         else:
             args.ingress = "local"
-    if args.ingress in ("cloudflare", "both") and not args.host and interactive:
+    if args.ingress in ("cloudflare", "both", "ngrok") and not args.host and interactive:
         try:
-            args.host = input("Public hostname for Cloudflare (e.g. loopback.example.com): ").strip() or None
+            args.host = input("Stable public hostname (e.g. loopback.example.com): ").strip() or None
         except EOFError:
             args.host = None
+    if args.ingress == "ngrok" and not args.ngrok_config and interactive:
+        try:
+            args.ngrok_config = input("Existing ngrok v3 configuration file: ").strip() or None
+        except EOFError:
+            args.ngrok_config = None
+    if args.ingress == "ngrok":
+        if not args.host or not args.ngrok_config:
+            die("ngrok needs --host and --ngrok-config with a stable HTTPS endpoint", 2)
+        if not confirm("Expose this MCP endpoint through public ngrok HTTPS?", assume_yes=args.yes):
+            die("public ngrok exposure needs confirmation or --yes", 2)
     if args.ingress in ("tailscale", "both") and args.tailscale_mode == "funnel":
         msg = "Tailscale Funnel exposes Loopback to the PUBLIC internet (OAuth still required). Continue?"
         if not confirm(msg, default=False, assume_yes=args.yes):
@@ -1064,6 +1082,16 @@ def cmd_install(args: argparse.Namespace) -> int:
                     fix="pass --source <checkout or extracted release>")
         return 1
     report.step("source", True, f"{src} (v{source_version(src)})")
+    from install_discovery import inventory
+
+    found = inventory(Path(ident.home))
+    report.set("discovery", found)
+    say("\nLocal infrastructure inventory (read-only; no remote hosts contacted)")
+    for name, available in found["binaries"].items():
+        say(f"  {name:12} {'available' if available else 'not installed'}")
+    say(f"  Tailscale    {found['tailscale']['state']}; existing routes: {found['tailscale']['routes']}")
+    say(f"  SSH aliases  {', '.join(found['ssh_aliases'][:12]) or 'none observed'} ({found['ssh_config']})")
+    say("Existing routes remain externally owned. Installation does not replace them.")
     ask_install_questions(args)
 
     cfg.mkdir(parents=True, exist_ok=True)
@@ -1139,7 +1167,8 @@ def cmd_install(args: argparse.Namespace) -> int:
             "--tailscale-mode", args.tailscale_mode, "--source", str(src)]
     for flag, value in (("--host", args.host), ("--port", args.port),
                         ("--cloudflare-token-file", args.cloudflare_token_file),
-                        ("--cloudflare-tunnel-id", args.cloudflare_tunnel_id)):
+                        ("--cloudflare-tunnel-id", args.cloudflare_tunnel_id),
+                        ("--ngrok-config", args.ngrok_config), ("--settings-file", args.settings_file)):
         if value:
             argv += [flag, str(value)]
     for flag, value in (("--no-service", args.no_service), ("--no-autostart", args.no_autostart),
@@ -1156,6 +1185,15 @@ def cmd_install(args: argparse.Namespace) -> int:
 
 
 def apply_ingress(ctx: Any, args: argparse.Namespace, report: Report) -> None:
+    if args.ingress == "ngrok":
+        try:
+            ctx.ingress.apply_ngrok(True, hostname=args.host,
+                                    config_file=str(Path(args.ngrok_config).expanduser().resolve()), confirm_public=True)
+            ctx.ingress.stop_ngrok()
+            report.step("ngrok ingress", True, "configured; gateway supervises the connector")
+        except Exception as exc:
+            report.step("ngrok ingress", False, str(exc), fix="check ngrok configuration and its stable hostname")
+        return
     want_ts = args.ingress in ("tailscale", "both")
     want_cf = args.ingress in ("cloudflare", "both")
     if not (want_ts or want_cf):
@@ -1247,6 +1285,14 @@ def install_stage2(args: argparse.Namespace) -> int:
     report.step("configuration", True, "migrated from v3 config.env" if migrated else "config.json")
     try:
         updates: dict[str, Any] = {}
+        if args.settings_file:
+            settings = json.loads(Path(args.settings_file).expanduser().read_text(encoding="utf-8"))
+            if not isinstance(settings, dict):
+                raise ValueError("settings file must contain a JSON object")
+            allowed = {"port", "bind", "public_host", "display_name", "node_kind", "ingress", "discovery", "maintenance"}
+            if set(settings) - allowed:
+                raise ValueError("settings file contains unsupported fields; see docs/INSTALLER.md")
+            updates.update(settings)
         if args.port:
             updates["port"] = int(args.port)
         if args.ingress in ("cloudflare", "both") and args.host:
@@ -1265,6 +1311,21 @@ def install_stage2(args: argparse.Namespace) -> int:
             report.step("policy defaults", False, str(exc))
     report.step("policy", True, f"profile={ctx.policy.profile} (home workspace {ident.home})")
     report.step("credentials", True, "machine token + OAuth signing key (stored 0600, not shown)")
+    account = ctx.auth.ensure_dashboard_account()
+    connector_key = ctx.auth.ensure_connector_key()
+    if account:
+        _EXTRA_SECRETS.add(account["password"])
+    if connector_key:
+        _EXTRA_SECRETS.add(connector_key)
+    # Intentional one-time terminal disclosure. Never add these values to Report or saved logs.
+    if account:
+        say("\nGenerated dashboard account. Save these values now:")
+        say(f"  Username: {account['username']}")
+        say(f"  Password: {account['password']}")
+    if connector_key:
+        say("\nGenerated connector setup key. Save it now:")
+        say(f"  {connector_key}")
+        say("  Use it on Loopback's OAuth consent page. It is separate from dashboard sign-in.")
     if ctx.legacy_mcp_token_enabled():
         report.step("legacy machine-token MCP access", None,
                     "kept ON for existing clients; migrate them to OAuth/API tokens, then 'loopback auth legacy off'",
@@ -1312,7 +1373,7 @@ def install_stage2(args: argparse.Namespace) -> int:
         say(f"  MCP endpoint (public): https://{host}/mcp")
     say(f"  Dashboard:            http://127.0.0.1:{port}/admin")
     say("")
-    say("Open this one-time link on this machine within 10 minutes to set the dashboard password:")
+    say("Recovery: open this one-time link on this machine within 10 minutes to reset the dashboard password:")
     say(f"  {url}")
     say("  (new link any time: loopback auth enroll)")
     say(f"\nReport: {cfg / 'install-report.json'}  (loopback report)")
@@ -1330,6 +1391,8 @@ def detect_ingress(cfg: Path) -> list[str]:
             out.append("cloudflare")
         if (ing.get("tailscale") or {}).get("enabled"):
             out.append(f"tailscale-{(ing.get('tailscale') or {}).get('mode', 'serve')}")
+        if (ing.get("ngrok") or {}).get("enabled"):
+            out.append("ngrok")
     else:
         env = parse_env(cfg / "config.env")
         ingress = (env.get("LOOPBACK_INGRESS") or "local").lower()
@@ -1776,6 +1839,8 @@ def urls(cfg: Path) -> dict[str, Any]:
         hosts.append(ing["cloudflare"]["hostname"])
     if (ing.get("tailscale") or {}).get("enabled") and ing["tailscale"].get("dns_name"):
         hosts.append(str(ing["tailscale"]["dns_name"]).rstrip("."))
+    if (ing.get("ngrok") or {}).get("enabled") and ing["ngrok"].get("hostname"):
+        hosts.append(ing["ngrok"]["hostname"])
     if not data:
         env = parse_env(cfg / "config.env")
         if (env.get("LOOPBACK_INGRESS") or "local") != "local" and env.get("LOOPBACK_PUBLIC_HOST"):
@@ -1837,6 +1902,11 @@ def ensure_cli_ingress(cfg: Path) -> bool:
         return False
     if result.get("pid"):
         say(f"{OK_MARK} Cloudflare connector running (pid {result['pid']})")
+    for name, provider in (result.get("providers") or {}).items():
+        if name == "cloudflare" and provider.get("pid"):
+            say(f"{OK_MARK} Cloudflare connector running (pid {provider['pid']})")
+        elif name == "ngrok":
+            say(f"{OK_MARK} ngrok connector started; public MCP connectivity remains unverified")
     return True
 
 
@@ -1908,7 +1978,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_logs(args: argparse.Namespace) -> int:
     cfg = cfg_dir()
-    name = {"server": "server.log", "cloudflared": "cloudflared.log", "tailscale": "tailscale.log"}[args.file]
+    name = {"server": "server.log", "cloudflared": "cloudflared.log", "tailscale": "tailscale.log", "ngrok": "ngrok.log"}[args.file]
     log = cfg / name
     if not log.exists():
         die(f"{log} does not exist yet")
@@ -1994,7 +2064,15 @@ def cmd_report(args: argparse.Namespace) -> int:
             out[name] = data
     if not out:
         die("no install report found")
-    emit_json(out if len(out) > 1 else next(iter(out.values())))
+    if args.json:
+        emit_json(out if len(out) > 1 else next(iter(out.values())))
+    else:
+        for name, data in out.items():
+            say(f"\n{name}: {'complete' if data.get('ok') else 'incomplete'}")
+            say(f"  {'STATE':9} {'STEP':32} DETAIL")
+            for step in data.get("steps", []):
+                state = "OK" if step.get("ok") else ("WARNING" if step.get("ok") is None or step.get("level") != "error" else "ERROR")
+                say(redact(f"  {state:9} {step.get('name', ''):32} {step.get('detail', '')}"))
     return 0
 
 
@@ -2031,6 +2109,24 @@ def cmd_auth(args: argparse.Namespace) -> int:
         code = auth.create_enrollment(int(args.ttl))
         say(f"One-time dashboard setup link (valid {int(args.ttl) // 60} min, open on this machine):")
         say(f"  http://127.0.0.1:{ctx.config.port}/admin/enroll#code={code}")
+        return 0
+    if action == "connector-key":
+        value = auth.rotate_connector_key() if args.rotate else auth.ensure_connector_key()
+        if value:
+            say("Connector setup key (shown once; existing OAuth grants remain valid):")
+            say(value)
+        else:
+            say("A setup key already exists. Use --rotate to replace it. Revoke existing clients separately if needed.")
+        return 0
+    if action == "account":
+        if not sys.stdin.isatty():
+            die("auth account needs an interactive terminal", 2)
+        username = input("Dashboard username: ").strip()
+        password = getpass.getpass("New dashboard password: ")
+        if getpass.getpass("Repeat password: ") != password:
+            die("passwords do not match", 2)
+        auth.set_dashboard_account(username, password)
+        say("Dashboard account saved. Existing dashboard sessions are signed out.")
         return 0
     if action == "token":
         sub = args.token_cmd
@@ -2475,6 +2571,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--tailscale-mode", choices=("serve", "funnel"), default="serve")
     sp.add_argument("--cloudflare-token-file")
     sp.add_argument("--cloudflare-tunnel-id")
+    sp.add_argument("--ngrok-config", help="existing ngrok v3 configuration file (not copied or printed)")
+    sp.add_argument("--settings-file", default=os.environ.get("LOOPBACK_SETTINGS_FILE"), help="optional JSON installation settings")
     sp.add_argument("--no-service", action="store_true", help="do not install a service unit (use 'loopback up')")
     sp.add_argument("--no-autostart", action="store_true", help="same as --no-service")
     sp.add_argument("--source", help="checkout / extracted release to install from")
@@ -2521,7 +2619,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("logs", cmd_logs, "show logs (redacted)")
     sp.add_argument("-f", "--follow", action="store_true")
     sp.add_argument("-n", type=int, default=100)
-    sp.add_argument("--file", choices=("server", "cloudflared", "tailscale"), default="server")
+    sp.add_argument("--file", choices=("server", "cloudflared", "tailscale", "ngrok"), default="server")
     sp = add("url", cmd_url, "print the MCP URL")
     sp.add_argument("--json", action="store_true")
     sp = add("dashboard", cmd_dashboard, "print (or open) the dashboard URL")
@@ -2529,7 +2627,9 @@ def build_parser() -> argparse.ArgumentParser:
     add("token", cmd_token, "print the machine recovery token")
     sp = add("version", cmd_version, "print versions")
     sp.add_argument("--json", action="store_true")
-    add("report", cmd_report, "print the sanitized install report")
+    sp = add("report", cmd_report, "print the sanitized install report")
+    sp.add_argument("--json", action="store_true", help="print machine-readable output")
+    add("help", lambda args: p.print_help(), "show command help")
 
     sp = add("auth", cmd_auth, "authentication management")
     asub = sp.add_subparsers(dest="auth_cmd", required=True)
@@ -2554,6 +2654,9 @@ def build_parser() -> argparse.ArgumentParser:
     asub.add_parser("rotate-machine-token")
     asub.add_parser("rotate-signing-key")
     asub.add_parser("password")
+    asub.add_parser("account", help="set the dashboard username and password")
+    a = asub.add_parser("connector-key", help="create or rotate the reusable OAuth consent setup key")
+    a.add_argument("--rotate", action="store_true")
     a = asub.add_parser("legacy")
     a.add_argument("state", choices=("on", "off"))
 

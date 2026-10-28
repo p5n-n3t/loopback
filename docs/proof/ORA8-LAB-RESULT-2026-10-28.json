@@ -1,0 +1,36 @@
+{
+  "tested_source": "9c19148262ada84be1f5d1345afbf8bb43ef9f43",
+  "completed_at_utc": "2026-10-28T10:56:16.502Z",
+  "transport": "Tailscale SSH from the authorized desktop",
+  "host": "ora8",
+  "account": "loopback-lab",
+  "port": 3147,
+  "checks": [
+    "checkout install.sh with private venv",
+    "local HTTP health and private loopback listener",
+    "authenticated MCP initialize and pwd",
+    "HTTP DCR, PKCE exchange and MCP: none",
+    "HTTP DCR, PKCE exchange and MCP: client_secret_basic",
+    "HTTP DCR, PKCE exchange and MCP: client_secret_post",
+    "unsupported-only grants rejected",
+    "HTTP password enrollment, login and one-time code replay rejection",
+    "direct CLI repeat install preserves machine token and signing key",
+    "doctor --deep and report",
+    "same-source actual updater and backup",
+    "runtime rollback preserves credentials",
+    "owned gateway shutdown frees port"
+  ],
+  "ok": true,
+  "cleanup": "owned process stopped and run directory removed",
+  "listener_closed_after_cleanup": true,
+  "source_checkout_cleaned": true,
+  "scope": "Dedicated ora8 loopback-lab account; private temporary installation; IPv4 loopback port 3147.",
+  "limits": [
+    "No desktop or production worker deployment.",
+    "No permanent ora8 worker registration.",
+    "No actual ChatGPT or Claude browser session.",
+    "No live ngrok account, public TLS, or tunnel acceptance.",
+    "Upgrade and rollback use the same reviewed source, not cross-version migration."
+  ],
+  "harness_note": "The first wrapper attempt rejected an incorrect expected revision before installation. The corrected exact-revision run passed."
+}

@@ -8,6 +8,7 @@
 <title>Loopback · Control plane</title>
 <link rel="stylesheet" href="/admin/static/app.css">
 <script src="/admin/static/topology.js" defer></script>
+<script src="/admin/static/dotrix.js" defer></script>
 <script src="/admin/static/app.js" defer></script>
 </head>
 <body data-host="{{HOST}}">
@@ -27,7 +28,7 @@
 </header>
 <div class="layout">
   <nav id="nav" class="nav" aria-label="Sections">
-    <a class="workspace-brand" href="#/" aria-label="Loopback overview" data-testid="brand"><img class="brand-symbol" src="https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/NkkqcpcALQ_FMecD2aRwM.png" alt="" width="36" height="36"><span><img class="brand-wordmark" src="https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/mZnvkqIch_h_x3M0nEWyl.png" alt="Loopback" height="18"><small class="brand-url" title="Dashboard address">{{HOST}}</small></span></a>
+    <a class="workspace-brand" href="#/" aria-label="Loopback overview" data-testid="brand"><img class="brand-symbol" src="https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/NkkqcpcALQ_FMecD2aRwM.png" alt="" width="36" height="36"><span><img class="brand-wordmark" src="https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/JakyxEgh4K-gr9TRB4VkN.png" alt="Loopback" height="32"><small class="brand-url" title="Dashboard address">{{HOST}}</small></span></a>
     <label class="nav-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Find a section" aria-label="Find a section" data-input="nav-search"></label>
     <div class="nav-group">Workspace</div>
     <a href="#/" data-route="">Overview</a>
@@ -41,7 +42,7 @@
     <a href="#/tools" data-route="tools">MCP tools</a>
     <a href="#/auth" data-route="auth">Authentication</a>
     <div class="nav-group">Network</div>
-    <a href="#/cloudflare" data-route="cloudflare">Cloudflare</a>
+    <a href="#/cloudflare" data-route="cloudflare">Public tunnels</a>
     <a href="#/tailscale" data-route="tailscale">Tailscale</a>
     <a href="#/ssh" data-route="ssh">SSH config</a>
     <div class="nav-group">Maintain</div>

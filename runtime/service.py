@@ -673,11 +673,11 @@ def start_ingress(ctx: Any) -> dict[str, Any]:
 
 
 def stop_ingress(ctx: Any) -> dict[str, Any]:
-    """Stop the managed cloudflared (Tailscale Serve/Funnel config is left untouched)."""
+    """Stop owned connector processes. Preserve existing Tailscale Serve/Funnel handlers."""
     ingress = getattr(ctx, "ingress", None)
     if ingress is None or not hasattr(ingress, "stop_cloudflare"):
         return {"ok": True, "action": "none"}
     try:
-        return ingress.stop_cloudflare()
+        return ingress.stop_all() if callable(getattr(ingress, "stop_all", None)) else ingress.stop_cloudflare()
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)[:300]}
