@@ -55,6 +55,30 @@ const KINDS = ['local-computer', 'remote-physical', 'remote-vm', 'container', 'g
 const STATUS = ['healthy', 'degraded', 'unreachable', 'auth_failed', 'disconnected', 'untested', 'stale'];
 const STATUS_LABEL = { healthy: 'Healthy', degraded: 'Degraded', unreachable: 'Unreachable', auth_failed: 'Auth failed', disconnected: 'Disconnected', untested: 'Untested', stale: 'Stale', error: 'Error' };
 
+/* -- icons: code-native dot-matrix (5×5) glyphs in the DOTRIX spirit, recoloured through currentColor.
+ * The active navigation item fills them with the Loopback symbol gradient (defined once in index.html). */
+const DM = {
+  overview: ['##.##', '##.##', '.....', '##.##', '##.##'], topology: ['..#..', '.#.#.', '#.#.#', '.#.#.', '..#..'],
+  local: ['#####', '#...#', '#####', '..#..', '.###.'], services: ['.#.#.', '.#.#.', '#####', '.###.', '..#..'],
+  fleet: ['#####', '#...#', '#####', '#...#', '#####'], filesystem: ['##...', '#####', '#...#', '#...#', '#####'],
+  shell: ['#....', '.#...', '..#..', '.#...', '#.###'], tools: ['...##', '..###', '.##..', '##...', '#....'],
+  auth: ['.###.', '#...#', '#####', '#.#.#', '#####'], cloudflare: ['..#..', '.###.', '#####', '#####', '.....'],
+  tailscale: ['#.#.#', '.....', '#.#.#', '.....', '#.#.#'], ssh: ['##...', '#.#..', '.###.', '..#.#', '...##'],
+  jobs: ['#####', '.#.#.', '..#..', '.#.#.', '#####'], logs: ['#####', '.....', '#####', '.....', '#####'],
+  security: ['#####', '#####', '#####', '.###.', '..#..'], backup: ['..#..', '.###.', '#.#.#', '..#..', '#####'],
+  updates: ['..#..', '.###.', '#.#.#', '..#..', '..#..'], settings: ['.#.#.', '#####', '.#.#.', '#####', '.#.#.'],
+  welcome: ['..#..', '..#..', '#####', '..#..', '..#..'], search: ['.##..', '#..#.', '.##..', '...#.', '....#'],
+  machine: ['#####', '#...#', '#####', '..#..', '.###.'], traffic: ['..#..', '.####', '..#..', '####.', '..#..'],
+  memory: ['.###.', '#####', '#.#.#', '#####', '.###.'], theme: ['.###.', '##..#', '##..#', '##..#', '.###.'],
+  menu: ['#####', '.....', '#####', '.....', '#####'], close: ['#...#', '.#.#.', '..#..', '.#.#.', '#...#'],
+};
+function dm(name, cls = '') {
+  const rows = DM[name] || DM.overview, dots = [];
+  rows.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === '#') dots.push(`<circle cx="${2 + x * 4}" cy="${2 + y * 4}" r="1.55"/>`); }));
+  return `<svg class="dmx ${cls}" viewBox="0 0 20 20" aria-hidden="true" focusable="false">${dots.join('')}</svg>`;
+}
+const ICON = new Proxy({}, { get: (_, k) => dm(String(k)) });
+
 /* -- UI atoms */
 const al = (k, t, m, x = '') => H`<div class="alert ${k}"><span><b>${t}</b>${m}</span>${x}</div>`;
 const lnk = (h, t, c = 'sm ghost') => H`<a class="btn ${c}" href="${h}">${t}</a>`;
@@ -362,16 +386,49 @@ function alertsHtml(alerts) {
 /* ============================================================ VIEWS */
 
 /* -- Overview */
-const per = x => x == null ? '—' : Number(x).toFixed(1) + '%';
-function ring(value, label, detail = '') {
+/* Percentages: null stays "—" (unknown), tiny positive values keep one decimal so 0.4% is not shown as 0%. */
+const per = (x, d = 1) => x == null ? '—' : Number(x).toFixed(Number(x) > 0 && Number(x) < 10 ? Math.max(d, 1) : d) + '%';
+const gaugeText = x => x == null ? '—' : Number(x) === 0 ? '0%' : Number(x) < 1 ? Number(x).toFixed(1) + '%' : Number(x) < 10 ? Number(x).toFixed(1).replace(/\.0$/, '') + '%' : Math.round(Number(x)) + '%';
+const tone = x => x == null ? 'unknown' : x >= 90 ? 'bad' : x >= 70 ? 'warn' : 'ok';
+/* aaPanel-style circular gauge: centred percentage, threshold colour, absolute values underneath. */
+function ring(value, label, detail = '', { size = 'lg', cls = '' } = {}) {
   const n = value == null ? 0 : Math.max(0, Math.min(100, value));
-  return H`<div class="ring-stat"><svg viewBox="0 0 48 48" role="img" aria-label="${label}: ${per(value)}"><circle class="ring-track" cx="24" cy="24" r="20"/><circle class="ring-fill" cx="24" cy="24" r="20" pathLength="100" stroke-dasharray="${n} 100"/><text x="24" y="27" text-anchor="middle">${value == null ? '—' : Math.round(n) + '%'}</text></svg><span><b>${label}</b><small>${detail}</small></span></div>`;
+  const r = size === 'lg' ? 26 : 20, c = r * 2 + 8, mid = c / 2;
+  return H`<div class="ring-stat ${size} ${tone(value)} ${cls}" data-testid="ring-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}"><svg viewBox="0 0 ${c} ${c}" role="img" aria-label="${label}: ${per(value)}"><circle class="ring-track" cx="${mid}" cy="${mid}" r="${r}"/><circle class="ring-fill" cx="${mid}" cy="${mid}" r="${r}" pathLength="100" stroke-dasharray="${value == null ? 0 : Math.max(n, n > 0 ? 1.5 : 0)} 100" style="transform-origin:${mid}px ${mid}px"/><text x="${mid}" y="${mid + (size === 'lg' ? 5 : 4)}" text-anchor="middle">${gaugeText(value)}</text></svg><span><b>${label}</b><small>${detail}</small></span></div>`;
+}
+/* KB/s bars with a real denominator: the largest rate on the page right now (never a made-up percentage). */
+const kbs = n => n == null ? '—' : n < 1024 * 100 ? (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB/s' : (n / 1048576).toFixed(1) + ' MB/s';
+function rateBar(label, value, max, state) {
+  const p = value == null || !max ? 0 : Math.max(value > 0 ? 2 : 0, Math.min(100, value / max * 100));
+  const text = state === 'first' ? 'first sample' : state === 'unavailable' ? 'unavailable' : value === 0 ? '0 KB/s (idle)' : kbs(value);
+  return H`<div class="rate-bar ${state}"><span class="rate-label">${label}</span><span class="rate-track" aria-hidden="true"><span class="rate-fill" style="width:${p.toFixed(1)}%"></span></span><span class="rate-value">${text}</span></div>`;
+}
+function sampleState(w) {
+  const rs = (w.rates || {}).state;
+  if (w.status === 'stale') return { key: 'stale', label: 'stale sample' };
+  if (w.status !== 'healthy' || !w.host) return { key: 'unavailable', label: 'telemetry unavailable' };
+  if (rs === 'unavailable') return { key: 'unavailable', label: 'host counters unavailable' };
+  if (rs !== 'measured') return { key: 'first', label: 'first sample — rates after the next one' };
+  return { key: 'measured', label: `measured over ${(w.rates || {}).interval_seconds || '?'}s` };
 }
 function workerCards(workers) {
+  const live = workers.filter(w => w.status === 'healthy' && w.host);
+  const maxHost = Math.max(1, ...live.flatMap(w => [w.host.rx_per_second || 0, w.host.tx_per_second || 0]));
+  const maxMcp = Math.max(1, ...live.flatMap(w => [w.worker.rx_per_second || 0, w.worker.tx_per_second || 0]));
   return H`<div class="worker-cards">${workers.map(w => {
-    const m = w.worker || {}, h = w.host || {};
-    return H`<article class="worker-card" data-testid="worker-card"><div class="row"><span class="machine-icon" aria-hidden="true">▤</span><div class="grow"><b>${w.target === 'local' ? 'This machine' : w.target}</b><div class="small muted">${w.target === 'local' ? 'Controller + local services' : 'Remote worker'}</div></div>${st(w.status)}</div>
-      ${w.worker ? H`<div class="worker-rings">${ring(m.cpu_percent, 'Loopback CPU', h.cpu_count + ' cores · host ' + per(h.cpu_percent))}${ring(m.memory_percent, 'Loopback memory', bytes(m.rss_bytes) + ' / ' + bytes(h.memory_total))}</div><div class="worker-network"><span>↓ ${bytes(m.rx_per_second)}/s</span><span>↑ ${bytes(m.tx_per_second)}/s</span><small>MCP payload</small></div><div class="small muted">Host RAM ${per(h.memory_percent)} · host traffic ↓ ${bytes(h.rx_per_second)}/s ↑ ${bytes(h.tx_per_second)}/s</div>` : H`<p class="muted">${w.error || 'Waiting for telemetry'}</p>`}
+    const m = w.worker || {}, h = w.host || {}, ss = sampleState(w), rs = ss.key === 'measured' ? 'measured' : ss.key;
+    const ifaces = arr(h.net_interfaces), excluded = arr(h.net_excluded);
+    return H`<article class="worker-card ${ss.key}" data-testid="worker-card" data-sample-state="${ss.key}"><div class="row"><span class="machine-icon" aria-hidden="true">${raw(ICON.machine)}</span><div class="grow"><b>${w.target === 'local' ? 'This machine' : w.target}</b><div class="small muted">${w.target === 'local' ? 'Controller + local services' : 'Remote worker'}${h.cpu_count ? ` · ${h.cpu_count} cores` : ''}${h.load1 != null ? ` · load ${h.load1}` : ''}</div></div>${st(w.status)}</div>
+      ${w.host ? H`<div class="worker-rings">
+        ${ring(ss.key === 'first' || ss.key === 'unavailable' ? null : h.cpu_percent, 'Host CPU', ss.key === 'measured' ? `${h.cpu_count || '?'} cores · whole host` : ss.label)}
+        ${ring(h.memory_percent, 'Host memory', h.memory_total ? `${bytes(h.memory_used)} of ${bytes(h.memory_total)} used` : 'unavailable')}
+      </div>
+      <div class="loopback-use" data-testid="loopback-use"><b>Loopback on this host</b><span>CPU ${ss.key === 'measured' ? per(m.cpu_percent) : '—'}</span><span>RSS ${bytes(m.rss_bytes)}${h.memory_total ? ` (${per(m.memory_percent, 2)})` : ''}</span><span>${m.process_count || 0} process${m.process_count === 1 ? '' : 'es'}</span></div>
+      <div class="rate-group"><div class="rate-head"><b>Host network</b><small>${ifaces.length ? ifaces.join(', ') : 'no physical adapters'}${excluded.length ? ` · ${excluded.length} virtual excluded` : ''}</small></div>
+        ${rateBar('↓ in', ss.key === 'measured' ? h.rx_per_second : null, maxHost, rs)}${rateBar('↑ out', ss.key === 'measured' ? h.tx_per_second : null, maxHost, rs)}</div>
+      <div class="rate-group"><div class="rate-head"><b>MCP payload</b><small>authenticated bytes through Loopback services</small></div>
+        ${rateBar('↓ in', ss.key === 'measured' ? m.rx_per_second : null, maxMcp, rs)}${rateBar('↑ out', ss.key === 'measured' ? m.tx_per_second : null, maxMcp, rs)}</div>
+      <div class="small muted sample-state" data-testid="sample-state">${ss.label}</div>` : H`<p class="muted">${w.error || 'Waiting for telemetry'}</p>`}
       <div class="worker-foot"><span class="small muted">Heartbeat ${rel(w.heartbeat_at)}</span><a href="#/services?target=${enc(w.target)}">Manage ↗</a></div></article>`;
   })}</div>`;
 }
@@ -388,21 +445,23 @@ function overview(o, audit, fleet) {
   const live = W.filter(w => w.status === 'healthy');
   const running = W.flatMap(w => w.bindings || []).filter(b => b.running);
   const mem = live.reduce((sum, w) => sum + (w.worker.rss_bytes || 0), 0);
-  const rx = live.some(w => w.worker.rx_per_second != null) ? live.reduce((sum, w) => sum + (w.worker.rx_per_second || 0), 0) : null;
-  const tx = live.some(w => w.worker.tx_per_second != null) ? live.reduce((sum, w) => sum + (w.worker.tx_per_second || 0), 0) : null;
-  const metric = (title, number, detail, tone, glyph) => H`<section class="card c3 summary-stat"><div class="row"><span class="metric-icon ${tone}" aria-hidden="true">${glyph}</span><b>${title}</b></div><div class="summary-value">${number}<small>${detail}</small></div></section>`;
+  const measured = live.filter(w => (w.rates || {}).state === 'measured');
+  const sumRate = key => measured.some(w => w.worker[key] != null) ? measured.reduce((sum, w) => sum + (w.worker[key] || 0), 0) : null;
+  const rx = sumRate('rx_per_second'), tx = sumRate('tx_per_second');
+  const rateText = v => v == null ? (live.length ? 'first sample' : '—') : v === 0 ? '0 KB/s' : kbs(v);
+  const metric = (title, number, detail, tone, glyph) => H`<section class="card c3 summary-stat"><div class="row"><span class="metric-icon ${tone}" aria-hidden="true">${raw(glyph)}</span><b>${title}</b></div><div class="summary-value">${number}<small>${detail}</small></div></section>`;
   return H`${head('Overview', 'Your services, wherever they run.', H`<span class="live-label">${dot('healthy')} Refreshes every 5s</span><a class="btn primary" href="#/services?new=1">+ New service</a>`)}
     <div class="grid overview-grid" data-testid="fleet-overview">
-      ${metric('Connected workers', live.length, 'of ' + W.length + ' registered', 'green', '▤')}
-      ${metric('Running services', running.length, B.length + ' configured', 'blue', '↗')}
-      ${metric('MCP throughput', bytes(rx) + '/s', '↑ ' + bytes(tx) + '/s outbound', 'purple', '⇄')}
-      ${metric('Loopback memory', bytes(mem), 'across connected workers', 'rose', '◫')}
-      ${card('Workers', H`<p class="section-desc">Loopback processes and their children. Percentages use the host’s total capacity.</p>${workerCards(W)}`, {cls: 'c12', actions: lnk('#/fleet', 'Manage workers')})}
+      ${metric('Connected workers', live.length, 'of ' + W.length + ' registered', 'green', ICON.machine)}
+      ${metric('Running services', running.length, B.length + ' configured', 'blue', ICON.services)}
+      ${metric('MCP payload', rateText(rx), '↑ ' + rateText(tx) + ' out · ' + (measured.length ? measured.length + ' measured' : 'no measured interval yet'), 'purple', ICON.traffic)}
+      ${metric('Loopback memory', bytes(mem), 'RSS across connected workers', 'rose', ICON.memory)}
+      ${card('Workers', H`<p class="section-desc">Whole-host CPU and memory first; Loopback’s own processes and their children are attributed separately underneath. Network bars are KB/s over the last interval, scaled to the busiest worker shown.</p>${workerCards(W)}`, {cls: 'c12', actions: lnk('#/fleet', 'Manage workers')})}
       ${card('Service routes', table(['Service', 'Worker', 'Transport', 'Exposure', 'State'], B.map(b => {
         const owner = W.find(w => w.target === b.target), status = owner?.bindings?.find(x => x.name === b.name);
         return H`<tr><td><a href="#/services?edit=${enc(b.name)}"><b>${b.name}</b></a></td><td>${b.target}</td><td>${b.transport.toUpperCase()}</td><td>${badge(b.exposure, b.exposure.includes('funnel') || b.exposure === 'cloudflare' ? 'warn' : 'info')}</td><td>${owner?.status !== 'healthy' ? st('unreachable') : st(status?.running ? 'healthy' : 'disconnected')}</td></tr>`;
       }), 'No services yet. Add an HTTP endpoint or a stdio MCP command, then choose its worker.'), {cls: 'c7', actions: lnk('#/services', 'View all')})}
-      ${card('Controller', H`<p class="section-desc">${o.identity?.hostname || ''} · Loopback ${o.version || ''}</p>${kv([['Local shell', lnk('#/shell', 'Review access')], ['Loopback CPU', per(local.worker?.cpu_percent)], ['Host CPU', per(local.host?.cpu_percent)], ['Host memory', bytes(local.host?.memory_used) + ' / ' + bytes(local.host?.memory_total)], ['OAuth clients', o.auth?.oauth_clients ?? 0], ['Policy', o.policy?.profile || '—']])}<hr class="sep"><p class="small muted">Remote services keep running when local shell access is disabled. SSH is used for worker control; MCP traffic goes to each worker directly.</p>`, {cls: 'c5', actions: lnk('#/topology', 'Topology ↗')})}
+      ${card('Controller', H`<p class="section-desc">${o.identity?.hostname || ''} · Loopback ${o.version || ''}</p>${kv([['Local shell', lnk('#/shell', 'Review access')], ['Host CPU', per(local.host?.cpu_percent)], ['Host memory', bytes(local.host?.memory_used) + ' / ' + bytes(local.host?.memory_total)], ['Loopback CPU', per(local.worker?.cpu_percent)], ['Loopback RSS', bytes(local.worker?.rss_bytes)], ['Endpoint protection', o.shield ? (o.shield.enabled ? badge((o.shield.blocked_now || []).length ? (o.shield.blocked_now || []).length + ' blocked' : 'active', (o.shield.blocked_now || []).length ? 'bad' : 'ok') : badge('off', 'off')) : null], ['OAuth clients', o.auth?.oauth_clients ?? 0], ['Policy', o.policy?.profile || '—']])}<hr class="sep"><p class="small muted">Remote services keep running when local shell access is disabled. SSH is used for worker control; MCP traffic goes to each worker directly.</p>`, {cls: 'c5', actions: lnk('#/topology', 'Topology ↗')})}
       ${card('Recent activity', auditTable(audit), {cls:'c12', actions:lnk('#/logs', 'View all')})}
     </div>`;
 }
@@ -1110,10 +1169,9 @@ F['wiz-ingress'] = async (f, o) => {
 };
 
 /* -- boot */
-const LB = { bytes, api, get, put, post, del, soft, H, raw, esc, toast, modal, confirmDo, panel, rel, abs, time, badge, dot, st, kv, safeKv, table, card, head, stamp, A, C, F, I, STATUS, STATUS_LABEL, isSecretKey, scrub, arr, enc, probeHtml, state, refresh, ApiError, errorsHtml };
+const LB = { bytes, kbs, dm, ICON, api, get, put, post, del, soft, H, raw, esc, toast, modal, confirmDo, panel, rel, abs, time, badge, dot, st, kv, safeKv, table, card, head, stamp, A, C, F, I, STATUS, STATUS_LABEL, isSecretKey, scrub, arr, enc, probeHtml, state, refresh, ApiError, errorsHtml };
 window.LB = LB;
-const navPaths = { '':'M3 10 12 3l9 7v10H3Z M9 20v-7h6v7', topology:'M12 3v6M4 14h16M4 14v6m16-6v6M9 3h6v6H9Z', services:'M4 4h16v6H4Zm0 10h16v6H4ZM7 7h.01M7 17h.01', fleet:'M3 4h18v12H3Zm5 16h8m-4-4v4', filesystem:'M3 6h7l2 3h9v11H3Z', shell:'m5 7 5 5-5 5m8 0h6', tools:'m9 7-5 5 5 5m6-10 5 5-5 5', auth:'M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5Z', cloudflare:'M6 18a5 5 0 0 1-1-10 7 7 0 0 1 13 1 4 4 0 0 1 0 9Z', tailscale:'M5 5h.01M12 5h.01M19 5h.01M5 12h.01M12 12h.01M19 12h.01M5 19h.01M12 19h.01M19 19h.01', ssh:'m5 7 5 5-5 5m8 0h6', jobs:'M5 4h14v17H5ZM9 8h6m-6 4h6m-6 4h4', logs:'M4 20V4m0 16h17M8 15l4-5 4 3 5-8', security:'M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7Zm-4 9 3 3 5-6', backup:'M4 5h16v5H4Zm2 5v10h12V10m-9 4h6', updates:'M5 8a8 8 0 1 1-1 7M5 3v5h5', settings:'M9 3h6l1 4 4 1v8l-4 1-1 4H9l-1-4-4-1V8l4-1Zm0 9a3 3 0 1 0 6 0 3 3 0 1 0-6 0', local:'M3 4h18v12H3Zm5 16h8m-4-4v4', welcome:'m4 12 5 5L20 5' };
-$$('#nav a[data-route]').forEach(a => { a.insertAdjacentHTML('afterbegin', '<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="' + (navPaths[a.dataset.route] || navPaths.services) + '"/></svg>'); });
+$$('#nav a[data-route]').forEach(a => { a.insertAdjacentHTML('afterbegin', dm(a.dataset.route || 'overview', 'nav-icon')); });
 applyTheme();
 $('#themeToggle').addEventListener('click', () => { localStorage.setItem('lb-theme', currentTheme() === 'dark' ? 'light' : 'dark'); applyTheme(); });
 $('#navToggle').addEventListener('click', () => setNav(!doc.body.classList.contains('nav-open')));

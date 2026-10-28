@@ -240,17 +240,47 @@ def process_sample(pid):
         return None
 
 
+# Stacked or virtual adapters carry traffic that a physical adapter already counts. Counting both
+# doubles the host figure, so they are listed separately and excluded from the host totals.
+VIRTUAL_IFACE = re.compile(r'^(lo|tailscale|ts|docker|br-|virbr|veth|tun|tap|wg|cni|flannel|lxc|lxd|vnet|utun|zt|nebula|podman)')
+
+
+def host_network(text):
+    """Parse /proc/net/dev into (rx_total, tx_total, counted_names, excluded_names)."""
+    counted, excluded, rx, tx = [], [], 0, 0
+    for line in text.splitlines()[2:]:
+        if ':' not in line:
+            continue
+        name, rest = line.split(':', 1)
+        name = name.strip()
+        fields = rest.split()
+        if len(fields) < 9:
+            continue
+        if VIRTUAL_IFACE.match(name):
+            excluded.append(name)
+            continue
+        counted.append(name)
+        rx += int(fields[0])
+        tx += int(fields[8])
+    return rx, tx, counted, excluded
+
+
 def metrics(root, controller_pid=None):
     host = {'cpu_count': os.cpu_count() or 1, 'cpu_seconds': None, 'cpu_idle_seconds': None,
-            'memory_total': None, 'memory_used': None, 'rx_bytes': None, 'tx_bytes': None}
+            'memory_total': None, 'memory_used': None, 'rx_bytes': None, 'tx_bytes': None,
+            'net_interfaces': [], 'net_excluded': [], 'load1': None}
     procs = {}
     try:
         cpu = [int(x) / os.sysconf('SC_CLK_TCK') for x in Path('/proc/stat').read_text().splitlines()[0].split()[1:9]]
         host.update(cpu_seconds=sum(cpu), cpu_idle_seconds=cpu[3] + cpu[4])
         mem = {line.split(':')[0]: int(line.split()[1]) * 1024 for line in Path('/proc/meminfo').read_text().splitlines()}
         host.update(memory_total=mem['MemTotal'], memory_used=mem['MemTotal'] - mem['MemAvailable'])
-        net = [line.split(':', 1)[1].split() for line in Path('/proc/net/dev').read_text().splitlines()[2:] if line.split(':')[0].strip() != 'lo']
-        host.update(rx_bytes=sum(int(x[0]) for x in net), tx_bytes=sum(int(x[8]) for x in net))
+        rx, tx, counted, excluded = host_network(Path('/proc/net/dev').read_text())
+        host.update(rx_bytes=rx, tx_bytes=tx, net_interfaces=counted, net_excluded=excluded)
+        try:
+            host['load1'] = round(os.getloadavg()[0], 2)
+        except (OSError, AttributeError):
+            pass
         for f in Path('/proc').iterdir():
             if f.name.isdigit():
                 p = process_sample(int(f.name))
