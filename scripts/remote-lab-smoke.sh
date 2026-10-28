@@ -180,9 +180,15 @@ try:
                 if auth_method == "client_secret_post":
                     refresh["client_secret"] = reg["client_secret"]
             tokens = request("POST", "/oauth/token", data=refresh, **credentials).json()
-            request("POST", "/mcp", headers={"Authorization": "Bearer " + tokens["access_token"],
+            mcp_response = request("POST", "/mcp", headers={"Authorization": "Bearer " + tokens["access_token"],
                 "Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-06-18"},
                 json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+            if "text/event-stream" in mcp_response.headers.get("content-type", ""):
+                payload = json.loads(next(line[5:].strip() for line in mcp_response.text.splitlines() if line.startswith("data:")))
+            else:
+                payload = mcp_response.json()
+            require("error" not in payload and isinstance(payload.get("result", {}).get("tools"), list)
+                    and payload["result"]["tools"], "Authenticated MCP tool result is missing")
             check("HTTP DCR, PKCE exchange and MCP: " + auth_method)
         rejected = request("POST", "/oauth/register", 400, json={"redirect_uris": [redirect],
             "grant_types": ["client_credentials"]}).json()
