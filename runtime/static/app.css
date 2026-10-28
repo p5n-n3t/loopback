@@ -259,7 +259,7 @@ input.invalid,textarea.invalid{border-color:var(--bad)}
 .nav .workspace-brand{display:flex;align-items:center;gap:10px;padding:2px 4px 18px;color:var(--text);border-radius:0;margin:0}
 .nav .workspace-brand::before{display:none}
 .brand-symbol{width:36px;height:36px;object-fit:contain;flex:none}
-.brand-wordmark{display:block;height:18px;width:auto;object-fit:contain}
+.brand-wordmark{display:block;height:32px;width:auto;object-fit:contain}
 .workspace-brand span{display:flex;flex-direction:column;gap:3px;min-width:0}
 .workspace-brand .brand-url{display:block;max-width:140px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
 .nav-search{display:flex;align-items:center;gap:6px;border:1px solid var(--line2);background:var(--panel);border-radius:999px;padding:2px 10px;margin:0 0 6px;color:var(--faint)}

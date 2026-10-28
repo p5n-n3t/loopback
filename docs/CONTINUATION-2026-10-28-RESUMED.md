@@ -75,10 +75,10 @@ Read `CONTINUE-HERE.md` first, then this checkpoint. Avoid replaying the old mig
 ## Owner follow-ups after the 07:05 checkpoint
 
 - The owner requests the latest wordmark from Figma file `r7Rdu2N3ttXa1K30PDfcnQ`, node `31:188`.
-  A fresh node fetch and render both return HTTP 403 with `Invalid token`.
-  Do not claim the updated wordmark was applied. The existing hosted asset remains in place.
-  Reconnect the Figma integration or obtain the owner's exported PNG/SVG before replacement.
-  Update both `runtime/auth_http.py` and `runtime/static/index.html`, then refresh affected visual proof once.
+  The initial export returned HTTP 403 `Invalid token`. The owner's reconnection restores access.
+  A fresh PNG export now succeeds. The hosted asset replaces navigation, login, and consent wordmarks.
+  Source raster size is 1029 by 377. The raster stays outside Git. The hosted URL is in the Figma manifest.
+  The new 32px display height preserves readability. A single refresh of the six affected views is pending.
 - The owner adds a new VM, `ora8`, to the intended fleet scope.
   Fresh read-only Tailscale status confirms it is online at `100.105.169.121`, DNS `ora8.bigeye-escalator.ts.net.`.
   Its IPv6 is `fd7a:115c:a1e0::8d29:a97a`.

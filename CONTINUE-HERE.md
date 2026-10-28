@@ -11,7 +11,7 @@ Read [current proof links](docs/proof/RESUMED-EVIDENCE.json) only when needed.
 - Compact logic/CLI proof and final delivery are the current remaining tasks.
 - The owner desktop remains on `609158a`. No continuation changes are deployed there.
 - Real ChatGPT/Claude browser sign-in and live ngrok acceptance remain external checks.
-- Latest wordmark replacement is blocked by Figma HTTP 403 `Invalid token`; the old asset remains.
+- Latest Figma wordmark export succeeds and replaces the login, consent, and navigation assets. Updated visual proof is in progress.
 - New VM ora8 is online on Tailscale at 100.105.169.121 but is not a registered Loopback worker.
 
 Fetch this branch to read these files. Preserve the new session's assigned working branch and any local changes.

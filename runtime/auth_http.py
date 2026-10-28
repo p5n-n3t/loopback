@@ -116,7 +116,7 @@ _STYLE = """
 body::before{content:"";position:fixed;inset:auto -20vw -30vh auto;width:60vw;height:60vh;background:var(--grad);opacity:.08;filter:blur(80px);pointer-events:none}
 .card{position:relative;width:min(440px,100%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:32px 28px 26px;box-shadow:0 20px 60px #0000000f}
 .brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;letter-spacing:0;font-size:12px;font-weight:600;color:var(--muted)}
-.brand img{display:block}.brand .symbol{width:36px;height:36px}.brand .wordmark{height:18px;width:auto}.brand .ctx{margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+.brand img{display:block}.brand .symbol{width:36px;height:36px}.brand .wordmark{height:32px;width:auto}.brand .ctx{margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
 h1{font-size:22px;letter-spacing:-.5px;margin:0 0 6px;font-weight:700}h1::after{content:"";display:block;width:28px;height:3px;border-radius:3px;background:var(--grad);margin-top:8px}
 p{color:var(--muted);margin:6px 0 14px}
 label{display:block;font-size:12px;font-weight:600;margin:14px 0 6px;color:var(--muted)}input{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit}
@@ -133,13 +133,13 @@ button.secondary{background:transparent;color:var(--muted);border-color:var(--li
 """
 
 BRAND_SYMBOL = "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/NkkqcpcALQ_FMecD2aRwM.png"
-BRAND_WORDMARK = "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/mZnvkqIch_h_x3M0nEWyl.png"
+BRAND_WORDMARK = "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/JakyxEgh4K-gr9TRB4VkN.png"
 
 
 def _brand(context: str = "") -> str:
     ctx = f'<span class="ctx">{html.escape(context)}</span>' if context else ""
     return (f'<div class="brand" data-testid="brand"><img class="symbol" src="{BRAND_SYMBOL}" alt="" width="36" height="36">'
-            f'<img class="wordmark" src="{BRAND_WORDMARK}" alt="Loopback" height="18">{ctx}</div>')
+            f'<img class="wordmark" src="{BRAND_WORDMARK}" alt="Loopback" height="32">{ctx}</div>')
 
 
 def _page(title: str, body: str) -> str:
