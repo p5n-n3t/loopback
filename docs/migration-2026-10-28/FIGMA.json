@@ -1,0 +1,95 @@
+{
+  "file_key": "r7Rdu2N3ttXa1K30PDfcnQ",
+  "name": "Twin - MicroSaaS Template",
+  "version": "2415228538227443059",
+  "last_modified_utc": "2026-10-28T02:35:57Z",
+  "nodes": {
+    "31:188": "Loopback Wordmark logo",
+    "31:189": "Loopback Symbol Logo",
+    "6:223": "Home (dark) - Desktop",
+    "1:882": "Home (light) - Desktop",
+    "6:2646": "404 (dark) - Desktop",
+    "6:1836": "404 (light) - Desktop"
+  },
+  "assets": {
+    "wordmark": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/mZnvkqIch_h_x3M0nEWyl.png",
+    "symbol": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/NkkqcpcALQ_FMecD2aRwM.png",
+    "light_reference_1_883": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/jyo3jEBGfKl87ifijWY2c.png",
+    "dark_reference_6_224": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/J5812-YvIRr1Mh4N9Ft-8.png"
+  },
+  "tokens": {
+    "ui_font": "Inter",
+    "nav_small_button": {
+      "size": 14,
+      "weight": 600,
+      "line_height": 21,
+      "padding": [
+        8,
+        16
+      ]
+    },
+    "large_button": {
+      "size": 16,
+      "weight": 600,
+      "line_height": 24,
+      "padding": [
+        12,
+        24
+      ]
+    },
+    "button_radius": 999,
+    "navigation_container_radius": 9999,
+    "illustration_panel_radii": [
+      12,
+      20
+    ],
+    "marketing_heading": {
+      "size": 54,
+      "weight": 700,
+      "line_height": 64.8
+    },
+    "marketing_body": {
+      "size": 20,
+      "weight": 400,
+      "line_height": 30
+    },
+    "symbol_gradient": [
+      {
+        "hex": "#FFF0A8",
+        "offset": 0
+      },
+      {
+        "hex": "#FFB249",
+        "offset": 0.3333
+      },
+      {
+        "hex": "#FF6B68",
+        "offset": 0.6667
+      },
+      {
+        "hex": "#EA55B9",
+        "offset": 1
+      }
+    ],
+    "wordmark_main_gradient": [
+      {
+        "hex": "#EE433D",
+        "offset": 0
+      },
+      {
+        "hex": "#FFC362",
+        "offset": 0.4578487
+      },
+      {
+        "hex": "#F99F7B",
+        "offset": 0.730666
+      },
+      {
+        "hex": "#ED58AC",
+        "offset": 1
+      }
+    ]
+  },
+  "interpretation": "Reference roots are landing and 404 frames with an embedded application illustration. Adapt their spacing, typography, buttons, and navigation to a functional dashboard. Do not replace dashboard functions with a marketing page. User requests restrained logo gradients.",
+  "asset_policy": "Use hosted raster URLs directly. Do not commit raster exports or temporary Figma URLs. Prefer existing code-native SVG icons with appropriate license and brand treatment."
+}

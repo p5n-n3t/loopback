@@ -1,3 +1,5 @@
+> Superseded for continuation by [HANDOFF-2026-10-28.md](HANDOFF-2026-10-28.md). This file remains historical evidence.
+
 # Loopback continuation checkpoint — 2026-10-27
 
 **Verified with deployment open items.** The integration fixes work in the real
