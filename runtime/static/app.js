@@ -651,11 +651,12 @@ C.ack = async t => {
 };
 
 /* -- MCP tools */
-const tl = { policy: null };
-views.tools = async v => {
-  const [tools, policy] = await Promise.all([get('/api/admin/tools'), get('/api/admin/policy')]);
-  tl.policy = policy;
-  const T = arr(tools, 'tools'), groups = {};
+/* The server merges every enable/disable against its authoritative lists (POST /api/admin/policy/tools) and
+ * returns the resulting catalog, which is rendered back verbatim. Changes are serialized through one queue so a
+ * rapid second click can never overwrite the first, and the checkbox state always comes from the server. */
+const tl = { queue: Promise.resolve(), tools: [] };
+function toolRows(T) {
+  const groups = {};
   T.forEach(t => { (groups[t.category || 'other'] = groups[t.category || 'other'] || []).push(t); });
   const ann = t => {
     const a = t.annotations || {}, c = [];
@@ -665,20 +666,63 @@ views.tools = async v => {
     if (t.network || a.openWorldHint) c.push(badge('network', 'warn'));
     return c;
   };
-  v.render(H`${head('MCP tools', `${T.length} tools. Disabled tools are hidden and refused.`, H`<input type="search" placeholder="Filter tools" data-input="tool-filter" aria-label="Filter tools">`)}
-    <div class="card">${table(['On', 'Tool', 'Annotations', 'Scope', 'Target', 'Approval'], Object.keys(groups).sort().map(g => H`<tr class="group-row"><td colspan="6">${g}</td></tr>${groups[g].map(t => H`<tr data-tool="${(t.name + ' ' + (t.title || '') + ' ' + g).toLowerCase()}">
+  return Object.keys(groups).sort().map(g => H`<tr class="group-row" data-group="${g}"><td colspan="6"><span class="grow">${g} <span class="muted">· ${groups[g].filter(t => t.enabled !== false).length}/${groups[g].length} on</span></span>
+      <span class="group-actions"><button type="button" class="sm ghost" data-act="tools-group" data-group="${g}" data-on="1">All on</button><button type="button" class="sm ghost" data-act="tools-group" data-group="${g}" data-on="0">All off</button></span></td></tr>${groups[g].map(t => H`<tr data-tool="${(t.name + ' ' + (t.title || '') + ' ' + g).toLowerCase()}" data-tool-name="${t.name}" data-tool-group="${g}">
       <td><input type="checkbox" data-change="tool-toggle" data-name="${t.name}"${chk(t.enabled !== false)} aria-label="Enable ${t.name}"></td>
       <td><code>${t.name}</code>${t.title && t.title !== t.name ? H` <b>${t.title}</b>` : ''}<div class="small muted">${String(t.description || '').slice(0, 160)}</div></td>
-      <td><div class="chips">${ann(t)}</div></td><td><code class="small">${t.scope || ''}</code></td><td>${t.target || ''}</td><td>${t.approval && t.approval !== 'none' ? badge(t.approval, 'warn') : badge('none', 'off')}</td></tr>`)}`), 'No tools reported.')}</div>`);
+      <td><div class="chips">${ann(t)}</div></td><td><code class="small">${t.scope || ''}</code></td><td>${t.target || ''}</td><td>${t.approval && t.approval !== 'none' ? badge(t.approval, 'warn') : badge('none', 'off')}</td></tr>`)}`);
+}
+function toolSummary(T) {
+  const on = T.filter(t => t.enabled !== false).length;
+  return `${on} of ${T.length} tools enabled. Disabled tools are hidden from tools/list and refused at tools/call.`;
+}
+views.tools = async v => {
+  const tools = await get('/api/admin/tools');
+  const T = tl.tools = arr(tools, 'tools');
+  v.render(H`${head('MCP tools', raw(`<span data-tools-summary>${esc(toolSummary(T))}</span>`), H`<input type="search" placeholder="Filter tools" data-input="tool-filter" aria-label="Filter tools">`)}
+    <div class="card"><div class="row bulk-bar" data-testid="tools-bulk"><span class="small muted grow" data-tools-scope>Bulk actions apply to all ${T.length} tools.</span>
+      <button type="button" class="sm" data-act="tools-bulk" data-on="1" data-testid="tools-select-all">Select all</button>
+      <button type="button" class="sm" data-act="tools-bulk" data-on="0" data-testid="tools-deselect-all">Deselect all</button></div>
+    ${table(['On', 'Tool', 'Annotations', 'Scope', 'Target', 'Approval'], toolRows(T), 'No tools reported.')}</div>`);
 };
-I['tool-filter'] = t => { const q = t.value.trim().toLowerCase(); $$('tr[data-tool]').forEach(r => { r.hidden = !!q && !r.dataset.tool.includes(q); }); };
+const visibleToolNames = () => $$('tr[data-tool]').filter(r => !r.hidden).map(r => r.dataset.toolName);
+I['tool-filter'] = t => {
+  const q = t.value.trim().toLowerCase();
+  $$('tr[data-tool]').forEach(r => { r.hidden = !!q && !r.dataset.tool.includes(q); });
+  $$('tr.group-row').forEach(r => { r.hidden = !!q && !$$(`tr[data-tool-group="${CSS.escape(r.dataset.group)}"]`).some(x => !x.hidden); });
+  const n = visibleToolNames().length, scope = $('[data-tools-scope]');
+  if (scope) scope.textContent = q ? `Bulk actions apply to the ${n} tools matching “${t.value.trim()}”.` : `Bulk actions apply to all ${tl.tools.length} tools.`;
+  const sa = $('[data-testid="tools-select-all"]'), da = $('[data-testid="tools-deselect-all"]');
+  if (sa) sa.textContent = q ? `Select ${n} shown` : 'Select all';
+  if (da) da.textContent = q ? `Deselect ${n} shown` : 'Deselect all';
+};
+/* Apply the server's answer to the table without re-rendering (keeps filter text and focus). */
+function applyTools(res) {
+  const T = tl.tools = arr(res && res.tools, 'tools').length ? arr(res.tools) : tl.tools;
+  T.forEach(t => { const box = $(`input[data-change="tool-toggle"][data-name="${CSS.escape(t.name)}"]`); if (box) box.checked = t.enabled !== false; });
+  $$('tr.group-row').forEach(r => { const g = r.dataset.group, rows = T.filter(t => (t.category || 'other') === g); const c = $('.muted', r); if (c) c.textContent = `· ${rows.filter(t => t.enabled !== false).length}/${rows.length} on`; });
+  const sum = $('[data-tools-summary]'); if (sum) sum.textContent = toolSummary(T);
+  arr(res && res.warnings).forEach(w => toast(w, 'warn', 6000));
+}
+/* One queue for every change: the next request only starts after the previous answer is applied. */
+function toolChange(body, label) {
+  const job = tl.queue.then(async () => { const res = await post('/api/admin/policy/tools', body); applyTools(res); if (label) toast(label, 'ok'); return res; });
+  tl.queue = job.catch(() => {});
+  return job;
+}
 C['tool-toggle'] = async t => {
-  const p = tl.policy || {}, name = t.dataset.name;
-  let allowed = arr(p.allowed_tools).slice(), denied = arr(p.denied_tools).filter(x => x !== name);
-  if (!t.checked) { denied.push(name); if (!allowed.includes('*')) allowed = allowed.filter(x => x !== name); }
-  else if (!allowed.includes('*') && !allowed.includes(name)) allowed.push(name);
-  try { tl.policy = await put('/api/admin/policy', { allowed_tools: allowed, denied_tools: denied }) || { ...p, allowed_tools: allowed, denied_tools: denied }; toast(`${name} ${t.checked ? 'enabled' : 'disabled'}`, 'ok'); }
-  catch (e) { t.checked = !t.checked; throw e; }
+  const name = t.dataset.name, on = t.checked;
+  try { await toolChange({ changes: { [name]: on } }, `${name} ${on ? 'enabled' : 'disabled'}`); }
+  catch (e) { t.checked = !on; throw e; }
+};
+A['tools-bulk'] = async t => {
+  const on = t.dataset.on === '1', names = visibleToolNames(), all = names.length === tl.tools.length;
+  if (!on && all && !await confirmDo('Disable every tool?', H`<p>All <b>${names.length}</b> tools will be hidden from clients and refused until you enable them again. The policy records an explicit deny-all.</p>`, 'Disable all')) return;
+  await toolChange(all ? { all: on } : { all: on, names }, `${on ? 'Enabled' : 'Disabled'} ${names.length} tool${names.length === 1 ? '' : 's'}`);
+};
+A['tools-group'] = async t => {
+  const on = t.dataset.on === '1', names = $$(`tr[data-tool-group="${CSS.escape(t.dataset.group)}"]`).map(r => r.dataset.toolName);
+  await toolChange({ all: on, names }, `${on ? 'Enabled' : 'Disabled'} ${t.dataset.group} tools`);
 };
 
 /* -- Authentication */

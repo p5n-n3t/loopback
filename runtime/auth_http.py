@@ -7,6 +7,7 @@ directly (never redirected) per OAuth 2.1 §4.1.2.1.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import html
 import ipaddress
@@ -21,8 +22,10 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from starlette.routing import Route
 
 from auth import (
+    CLIENT_AUTH_METHODS,
     DEFAULT_CLIENT_SCOPES,
     SCOPES,
+    SUPPORTED_GRANT_TYPES,
     AuthError,
     b64url,
     normalize_scopes,
@@ -194,10 +197,10 @@ def _as_metadata(ctx: AppContext, base: str) -> dict[str, Any]:
         "revocation_endpoint": f"{base}/oauth/revoke",
         "response_types_supported": ["code"],
         "response_modes_supported": ["query"],
-        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "grant_types_supported": list(SUPPORTED_GRANT_TYPES),
         "code_challenge_methods_supported": ["S256"],
-        "token_endpoint_auth_methods_supported": ["none"],
-        "revocation_endpoint_auth_methods_supported": ["none"],
+        "token_endpoint_auth_methods_supported": list(CLIENT_AUTH_METHODS),
+        "revocation_endpoint_auth_methods_supported": list(CLIENT_AUTH_METHODS),
         "scopes_supported": list(SCOPES),
         "authorization_response_iss_parameter_supported": True,
         "client_id_metadata_document_supported": bool(auth_cfg.get("allow_client_id_metadata_documents", True)),
@@ -245,6 +248,74 @@ async def _resolve_client(ctx: AppContext, client_id: str) -> dict[str, Any] | N
         record = ctx.auth.register_client(doc, kind="cimd", client_id=client_id)
         return ctx.auth.get_client(record["client_id"])
     return None
+
+
+# --------------------------------------------------------------------------- client authentication
+def _basic_credentials(request: Request) -> tuple[str, str] | None:
+    """Decode an HTTP Basic ``client_id:client_secret`` header (RFC 6749 §2.3.1, form-urlencoded parts)."""
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("basic "):
+        return None
+    try:
+        raw = base64.b64decode(header[6:].strip() + "=" * (-len(header[6:].strip()) % 4)).decode("utf-8")
+        cid, _, secret = raw.partition(":")
+        return urllib.parse.unquote(cid), urllib.parse.unquote(secret)
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+
+class ClientAuthFailure(Exception):
+    def __init__(self, description: str, *, method: str):
+        super().__init__(description)
+        self.description = description
+        self.method = method
+
+
+def authenticate_client(ctx: AppContext, request: Request, form: Any) -> dict[str, Any]:
+    """Resolve and authenticate the client for the token and revocation endpoints.
+
+    The registered ``token_endpoint_auth_method`` decides what is required:
+    ``none`` → the ``client_id`` form field identifies a public client (a stray secret is
+    ignored); ``client_secret_basic`` → the Basic header must carry the secret;
+    ``client_secret_post`` → the ``client_secret`` form field must carry it. The secret is
+    checked in constant time before any code or refresh token is consumed, so a failed
+    attempt never burns a grant. Raises ``ClientAuthFailure`` (→ 401 ``invalid_client``).
+    """
+    basic = _basic_credentials(request)
+    form_id = str(form.get("client_id") or "")
+    form_secret = str(form.get("client_secret") or "")
+    client_id = basic[0] if basic and basic[0] else form_id
+    if basic and form_id and form_id != basic[0]:
+        raise ClientAuthFailure("client_id in the Basic header and the form differ", method="client_secret_basic")
+    if not client_id:
+        raise ClientAuthFailure("client_id is required", method="none")
+    client = ctx.auth.get_client(client_id)
+    if not client:
+        raise ClientAuthFailure("unknown client", method="none")
+    method = client.get("token_endpoint_auth_method") or "none"
+    if method == "none":
+        return client
+    if method == "client_secret_basic":
+        if not basic:
+            raise ClientAuthFailure("this client is registered for client_secret_basic; send HTTP Basic credentials", method=method)
+        secret = basic[1]
+    else:  # client_secret_post
+        if basic:
+            raise ClientAuthFailure("this client is registered for client_secret_post; send client_secret in the body", method=method)
+        secret = form_secret
+    if not ctx.auth.verify_client_secret(client_id, secret):
+        raise ClientAuthFailure("client authentication failed", method=method)
+    return client
+
+
+def _client_auth_error(ctx: AppContext, request: Request, failure: ClientAuthFailure) -> Response:
+    ctx.auth.limiter.failure("token", client_ip(request), threshold=30)
+    ctx.auth.record_event("client_auth_failed", str(_basic_credentials(request) and _basic_credentials(request)[0] or "") or None,
+                          client_ip(request), {"method": failure.method})
+    headers = dict(NO_STORE)
+    if failure.method == "client_secret_basic":
+        headers["WWW-Authenticate"] = 'Basic realm="loopback"'
+    return JSONResponse({"error": "invalid_client", "error_description": failure.description}, status_code=401, headers=headers)
 
 
 # --------------------------------------------------------------------------- handlers
@@ -369,12 +440,13 @@ def routes(ctx: AppContext) -> list[Route]:
             return oauth_error("invalid_request", "rate limited", 429)
         form = await request.form()
         grant_type = str(form.get("grant_type") or "")
-        client_id = str(form.get("client_id") or "")
-        if not client_id:
-            return oauth_error("invalid_client", "client_id is required", 401)
-        client = ctx.auth.get_client(client_id)
-        if not client:
-            return oauth_error("invalid_client", "unknown client", 401)
+        try:
+            client = authenticate_client(ctx, request, form)
+        except ClientAuthFailure as failure:
+            return _client_auth_error(ctx, request, failure)
+        client_id = client["client_id"]
+        if grant_type in SUPPORTED_GRANT_TYPES and grant_type not in (client.get("grant_types") or SUPPORTED_GRANT_TYPES):
+            return oauth_error("unauthorized_client", f"this client was not registered for the {grant_type} grant")
         try:
             resource = ctx.auth.canonical_resource(str(form.get("resource") or "") or None)
         except AuthError as exc:
@@ -434,9 +506,18 @@ def routes(ctx: AppContext) -> list[Route]:
         form = await request.form()
         value = str(form.get("token") or "")
         hint = str(form.get("token_type_hint") or "") or None
+        # RFC 7009 §2.1: confidential clients authenticate; public clients only identify themselves.
+        if _basic_credentials(request) or form.get("client_id"):
+            try:
+                client = authenticate_client(ctx, request, form)
+            except ClientAuthFailure as failure:
+                return _client_auth_error(ctx, request, failure)
+            who = client["client_id"]
+        else:
+            who = "client"
         if value:
             ctx.auth.revoke_token(value, hint)
-            ctx.auth.record_event("token_revoked", str(form.get("client_id") or "client"), client_ip(request))
+            ctx.auth.record_event("token_revoked", who, client_ip(request))
         return Response(status_code=200, headers=NO_STORE)
 
     # ---------------------------------------------------------------- dashboard auth

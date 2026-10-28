@@ -864,20 +864,27 @@ def _hint(ann: Any, snake: str, default: bool) -> bool:
     return default if value is None else bool(value)
 
 
+def tool_enabled(name: str) -> bool:
+    """One answer for the dashboard catalog, tools/list visibility and tools/call enforcement."""
+    denied = set(POLICY.data.get("denied_tools") or [])
+    allowed = set(POLICY.data.get("allowed_tools") or ["*"])
+    m = TOOL_META.get(name, {"category": "other"})
+    enabled = name not in denied and "*" not in denied and ("*" in allowed or name in allowed)
+    if m["category"] == "browser" and not POLICY.data.get("allow_browser") and name != "browser_status":
+        enabled = False
+    if m["category"] == "desktop" and not POLICY.data.get("allow_desktop") and name != "desktop_status":
+        enabled = False
+    return enabled
+
+
 def tool_catalog() -> list[dict[str, Any]]:
     manager = getattr(mcp, "_tool_manager", None)
     tools = getattr(manager, "_tools", {}) if manager else {}
-    denied = set(POLICY.data.get("denied_tools") or [])
-    allowed = set(POLICY.data.get("allowed_tools") or ["*"])
     out = []
     for name, tool in sorted(tools.items()):
         ann = getattr(tool, "annotations", None)
         m = TOOL_META.get(name, {"scope": "loopback:exec", "category": "other", "target": "local", "network": False, "approval": "none"})
-        enabled = name not in denied and "*" not in denied and ("*" in allowed or name in allowed)
-        if m["category"] == "browser" and not POLICY.data.get("allow_browser") and name != "browser_status":
-            enabled = False
-        if m["category"] == "desktop" and not POLICY.data.get("allow_desktop") and name != "desktop_status":
-            enabled = False
+        enabled = tool_enabled(name)
         out.append({
             "name": name,
             "title": getattr(tool, "title", None) or name,
@@ -895,6 +902,17 @@ def tool_catalog() -> list[dict[str, Any]]:
 
 
 CTX.tool_catalog = tool_catalog
+CTX.tool_enabled = tool_enabled
+
+_unfiltered_list_tools = mcp.list_tools
+
+
+async def _policy_filtered_list_tools():
+    """Disabled tools are hidden from tools/list, not only refused at tools/call."""
+    return [t for t in await _unfiltered_list_tools() if tool_enabled(t.name)]
+
+
+mcp.list_tools = _policy_filtered_list_tools  # _handle_list_tools resolves self.list_tools at call time
 
 
 # ---------------------------------------------------------------------------

@@ -241,6 +241,67 @@ def routes(ctx: AppContext) -> list[Route]:
             warnings.append(reason)
         return ok({"policy": data, "warnings": warnings, "permissions": ctx.policy.effective_permissions("local")})
 
+    async def policy_tools(request: Request) -> Response:
+        """Authoritative per-tool enable/disable merge (fixes lost updates from client-side list editing).
+
+        Body: ``{"changes": {"tool_name": true|false, ...}}`` and/or ``{"all": true|false, "names": [...]}``
+        where ``names`` optionally limits a bulk change to a subset (a filtered or category view).
+        Disabling every known tool writes the explicit deny-all marker ``["*"]`` so unknown and future
+        tools stay refused too; enabling anything afterwards expands the marker into explicit names.
+        """
+        body = await read_json(request)
+        catalog = ctx.tool_catalog() if ctx.tool_catalog else []
+        known = [t["name"] for t in catalog]
+        changes: dict[str, bool] = {}
+        if "all" in body:
+            if not isinstance(body["all"], bool):
+                return bad_request("all must be true or false")
+            names = body.get("names")
+            if names is not None and (not isinstance(names, list) or not all(isinstance(n, str) for n in names)):
+                return bad_request("names must be a list of tool names")
+            for name in (names if names is not None else known):
+                changes[name] = body["all"]
+        raw = body.get("changes") or {}
+        if not isinstance(raw, dict) or not all(isinstance(v, bool) for v in raw.values()):
+            return bad_request("changes must map tool names to true/false")
+        changes.update({str(k): v for k, v in raw.items()})
+        unknown = sorted(set(changes) - set(known))
+        if unknown:
+            return bad_request("unknown tools", unknown)
+        if not changes:
+            return bad_request("no tool changes in body")
+        with ctx.policy._lock:
+            policy = ctx.policy.data
+            denied_now = [str(x) for x in (policy.get("denied_tools") or [])]
+            allowed_now = [str(x) for x in (policy.get("allowed_tools") or ["*"])]
+            wildcard_allowed = "*" in allowed_now or not allowed_now
+            # Effective state per known tool from the policy lists alone (browser/desktop gates are separate).
+            enabled = {n: (n not in denied_now and "*" not in denied_now and (wildcard_allowed or n in allowed_now)) for n in known}
+            enabled.update(changes)
+            extra_denied = [x for x in denied_now if x not in known and x != "*"]
+            if known and not any(enabled.values()):
+                denied = ["*", *extra_denied]
+                allowed = allowed_now if not wildcard_allowed else ["*"]
+            else:
+                denied = sorted(n for n in known if not enabled[n]) + extra_denied
+                if wildcard_allowed:
+                    allowed = ["*"]
+                else:
+                    keep = [x for x in allowed_now if x not in known]
+                    allowed = keep + sorted(n for n in known if enabled[n])
+            try:
+                data = ctx.policy.save({"allowed_tools": allowed, "denied_tools": denied})
+            except ValueError as exc:
+                return bad_request("policy rejected", str(exc).split("; "))
+        ctx.audit.record("policy.change", "ok", target="dashboard",
+                         detail={"keys": ["allowed_tools", "denied_tools"], "tools": sorted(changes), "enabled": sum(changes.values())})
+        warnings: list[str] = []
+        tools = ctx.tool_catalog() if ctx.tool_catalog else []
+        for t in tools:
+            if changes.get(t["name"]) is True and not t["enabled"]:
+                warnings.append(f"{t['name']} stays disabled until {t['category']} automation is allowed in the policy")
+        return ok({"policy": data, "tools": tools, "warnings": warnings})
+
     async def policy_profiles(request: Request) -> Response:
         return ok({"profiles": PROFILES, "aliases": PROFILE_ALIASES, "current": ctx.policy.profile})
 
@@ -471,6 +532,7 @@ def routes(ctx: AppContext) -> list[Route]:
         Route("/api/admin/policy", policy_get, methods=["GET"]),
         Route("/api/admin/policy", policy_put, methods=["PUT", "POST"]),
         Route("/api/admin/policy/profiles", policy_profiles, methods=["GET"]),
+        Route("/api/admin/policy/tools", policy_tools, methods=["POST", "PUT"]),
         Route("/api/admin/permissions", permissions_get, methods=["GET"]),
         Route("/api/admin/permissions/validate-path", validate_path, methods=["POST"]),
         Route("/api/admin/permissions/{target}", permissions_put, methods=["PUT"]),
