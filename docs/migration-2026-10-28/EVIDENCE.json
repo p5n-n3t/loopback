@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "last_checked_utc": "2026-10-28",
+  "current_session": "VljXFIggRnCdIHGFcHLNp",
+  "current_stale_count": 0,
+  "source_provenance": "Current code proof captured at 83ea1ca or equivalent fixes, merged as 609158a. Eleven registered artifacts remain current on Oct 28.",
+  "current": [
+    {
+      "label": "Services \u2014 Recovery Controls",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/EOoU2l1llDdIUf-5Sdewb.png",
+      "path": "/admin#/services",
+      "status": "ok",
+      "stale": false,
+      "scope": "Recovery Start for seeded dead process",
+      "kind": "screenshot"
+    },
+    {
+      "label": "Services \u2014 Navigation Entry",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/xtOmnykuec-Xg_9WqPt8j.png",
+      "path": "/admin",
+      "status": "ok",
+      "stale": false,
+      "scope": "Sidebar and seeded overview",
+      "kind": "screenshot"
+    },
+    {
+      "label": "Services \u2014 Recovered After Reload",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/DObN2Bc_KcTn7osyLHZYv.png",
+      "path": "/admin#/services",
+      "status": "ok",
+      "stale": false,
+      "scope": "Real isolated worker remains healthy after reload",
+      "kind": "screenshot"
+    },
+    {
+      "label": "Services \u2014 Connect Enrollment Link",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/ZTshZIJGLyqPJKbMId4-G.png",
+      "path": "/admin#/services",
+      "status": "ok",
+      "stale": false,
+      "scope": "Single-use sandbox enrollment fragment",
+      "kind": "screenshot"
+    },
+    {
+      "label": "Topology \u2014 Service Process Status",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/rWPAxxC03Qh1tCB4p5yNf.png",
+      "path": "/admin#/topology",
+      "status": "ok",
+      "stale": false,
+      "scope": "Isolated worker process and hosting edge",
+      "kind": "screenshot"
+    },
+    {
+      "label": "Worker \u2014 Enrollment Complete",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/SesTV_vAE-MeP_BDzagoZ.png",
+      "path": "/admin",
+      "status": "ok",
+      "stale": false,
+      "scope": "Authenticated sandbox worker connection page",
+      "kind": "screenshot"
+    },
+    {
+      "label": "Worker \u2014 Enrollment Complete Mobile",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/FSMzzgp9a7FgewuQu0Czi.png",
+      "path": "/admin",
+      "status": "ok",
+      "stale": false,
+      "scope": "Same isolated connection page on mobile",
+      "kind": "screenshot"
+    },
+    {
+      "label": "Service Recovery \u2014 Changed Steps",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-27/G_3JBMKSAjTs5u68nOXdT.png",
+      "path": "/admin#/services",
+      "status": "ok",
+      "stale": false,
+      "scope": "Five Node tests and isolated real worker restart",
+      "kind": "rendered logic chart"
+    },
+    {
+      "label": "Worker Enrollment \u2014 Changed Steps",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-27/w9XIeWGrIb8JTJFI6GyDu.png",
+      "path": "/admin/enroll",
+      "status": "ok",
+      "stale": false,
+      "scope": "Isolated enrollment, PKCE, echo tool, revocation",
+      "kind": "rendered logic chart"
+    },
+    {
+      "label": "Service Origins \u2014 Changed Steps",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-27/ueI5urqJDOglB2LjcAdJM.png",
+      "path": "/admin#/services",
+      "status": "ok",
+      "stale": false,
+      "scope": "Private origin and default 8443 tests. Tailscale commands mocked",
+      "kind": "rendered logic chart"
+    },
+    {
+      "label": "Worker Freshness \u2014 Changed Steps",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-27/EcuLzaE8HU6sG91o5AZvE.png",
+      "path": "/admin#/topology",
+      "status": "ok",
+      "stale": false,
+      "scope": "Five topology tests: cold, stale, failed, stopped, running",
+      "kind": "rendered logic chart"
+    }
+  ],
+  "historical_unpublished": [
+    {
+      "label": "Overview \u2014 Brand Gauges",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/lUBcoV44dBRIBotCgfnqA.png",
+      "status": "ok at historical capture",
+      "scope": "Unpublished DITW source, not current main or deployed desktop",
+      "session": "8ZVXsD7aCJK-ZKv9YsjTG"
+    },
+    {
+      "label": "Services \u2014 Edit Focuses Editor",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/e-_osjpoUsHFLbkrIKq_4.png",
+      "status": "ok at historical capture",
+      "scope": "Unpublished DITW source, not current main or deployed desktop",
+      "session": "8ZVXsD7aCJK-ZKv9YsjTG"
+    },
+    {
+      "label": "Overview \u2014 Dark Theme",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/bItWpa0O8bpv0JpMyo0LW.png",
+      "status": "ok at historical capture",
+      "scope": "Unpublished DITW source, not current main or deployed desktop",
+      "session": "8ZVXsD7aCJK-ZKv9YsjTG"
+    },
+    {
+      "label": "Shield \u2014 Attack Analytics",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/1xQN7ryPdEIlXLSE3N2GR.png",
+      "status": "ok at historical capture",
+      "scope": "Unpublished DITW source, not current main or deployed desktop",
+      "session": "8ZVXsD7aCJK-ZKv9YsjTG"
+    },
+    {
+      "label": "Tunnels \u2014 Adaptive Providers",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/o_KC8gJ_ZC0GQHLtDFv9b.png",
+      "status": "ok at historical capture",
+      "scope": "Unpublished DITW source, not current main or deployed desktop",
+      "session": "8ZVXsD7aCJK-ZKv9YsjTG"
+    },
+    {
+      "label": "Settings \u2014 Dashboard Access",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/r1EH8aAYXIbaQckuVaIXG.png",
+      "status": "ok at historical capture",
+      "scope": "Unpublished DITW source, not current main or deployed desktop",
+      "session": "8ZVXsD7aCJK-ZKv9YsjTG"
+    },
+    {
+      "label": "Topology \u2014 Discovery",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/ASj3_OVOM9ABoz0G1uPcM.png",
+      "status": "ok at historical capture",
+      "scope": "Unpublished DITW source, not current main or deployed desktop",
+      "session": "8ZVXsD7aCJK-ZKv9YsjTG"
+    },
+    {
+      "label": "Login \u2014 Dashboard Credentials",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/EksSesCtsVrzROEajAynJ.png",
+      "status": "ok at historical capture",
+      "scope": "Unpublished DITW source, not current main or deployed desktop",
+      "session": "8ZVXsD7aCJK-ZKv9YsjTG"
+    },
+    {
+      "label": "OAuth Consent \u2014 Connector Key",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/tEev4ONddE4nVha6wTjTR.png",
+      "status": "ok at historical capture",
+      "scope": "Unpublished DITW source, not current main or deployed desktop",
+      "session": "5k0VlvexbE9p_JFFPdLD2"
+    },
+    {
+      "label": "Navigation \u2014 Upgrade Entry Points",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/hII0wkpZM282UNGhWrYTc.png",
+      "status": "ok at historical capture",
+      "scope": "Unpublished DITW source, not current main or deployed desktop",
+      "session": "8ZVXsD7aCJK-ZKv9YsjTG"
+    },
+    {
+      "label": "Services \u2014 Connect Panel",
+      "status": "failed",
+      "failureClass": "selector_missing",
+      "note": "#enrollCode did not match",
+      "url": null
+    },
+    {
+      "label": "Services \u2014 Save Survives Reload",
+      "status": "failed",
+      "failureClass": "selector_missing",
+      "note": "#f_port[value=\"3033\"] did not match",
+      "url": null
+    }
+  ],
+  "historical_source_note": "Old screenshots cover icons.js, shield.py, discovery.py, dashboard_credentials.py and app.js f4488739... that current branch lacks. They are design/recovery context only.",
+  "limits": [
+    "No screenshot proves actual ChatGPT/Claude registration compatibility.",
+    "Seeded preview is isolated from owner VMs and public tunnel connectivity.",
+    "Charts use named tests or isolated runtime evidence, with mocks stated.",
+    "Historical failures remain unverified. Do not mark them passed.",
+    "Do not recapture unchanged current views solely because the account changes. Reconcile source coverage first.",
+    "Hosted URLs may depend on platform retention. Repository files remain the authoritative portable context."
+  ]
+}

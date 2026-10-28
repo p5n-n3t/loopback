@@ -1,3 +1,5 @@
+> Superseded for continuation by [HANDOFF-2026-10-28.md](HANDOFF-2026-10-28.md). This file remains historical evidence.
+
 # Loopback continuation checkpoint
 
 > Current recovery save: [CONTINUATION-2026-10-27.md](CONTINUATION-2026-10-27.md).
