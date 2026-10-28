@@ -71,3 +71,17 @@ The local Mermaid renderer already exists in `/tmp/flow-diff`. Reuse it if avail
 
 A new account needs legitimate repository access. Git preserves this state. It does not transfer personal subscriptions or private workspace sessions.
 Read `CONTINUE-HERE.md` first, then this checkpoint. Avoid replaying the old migration documents or screenshot sweep.
+
+## Owner follow-ups after the 07:05 checkpoint
+
+- The owner requests the latest wordmark from Figma file `r7Rdu2N3ttXa1K30PDfcnQ`, node `31:188`.
+  A fresh node fetch and render both return HTTP 403 with `Invalid token`.
+  Do not claim the updated wordmark was applied. The existing hosted asset remains in place.
+  Reconnect the Figma integration or obtain the owner's exported PNG/SVG before replacement.
+  Update both `runtime/auth_http.py` and `runtime/static/index.html`, then refresh affected visual proof once.
+- The owner adds a new VM, `ora8`, to the intended fleet scope.
+  Fresh read-only Tailscale status confirms it is online at `100.105.169.121`, DNS `ora8.bigeye-escalator.ts.net.`.
+  Its IPv6 is `fd7a:115c:a1e0::8d29:a97a`.
+  The managed SSH target list still contains only ora1/3/5/6/7/aws1/aws2. ora8 is not registered or installed as a worker.
+  Obtain or confirm SSH access details before registration or rollout. Do not guess the login account or deploy automatically.
+  This observation contacts no service on ora8. ora2 and ora4 remain excluded.
