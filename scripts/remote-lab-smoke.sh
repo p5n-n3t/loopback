@@ -39,8 +39,14 @@ for tool in ("bash", "curl", "tar"):
     require(shutil.which(tool), "Owner must provision " + tool)
 import venv, ensurepip  # require prerequisites before install.sh can offer package installation
 require(sys.version_info >= (3, 11), "Owner must provision Python 3.11+")
-with socket.socket() as probe:
-    probe.bind(("127.0.0.1", 3147))  # fail closed, never select another port or stop its occupant
+def assert_port_free(port=3147):
+    with socket.socket() as probe:
+        # Rebind after our closed connections enter TIME_WAIT, but reject a live listener.
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.bind(("127.0.0.1", port))
+
+
+assert_port_free()  # fail closed; never select another port or stop its occupant
 
 os.umask(0o077)
 work = Path(tempfile.mkdtemp(prefix="loopback-ora8-lab-"))
@@ -225,8 +231,7 @@ try:
     require(all((cfg / name).read_bytes() == value for name, value in preserved.items()), "Rollback changed credentials")
     check("runtime rollback preserves credentials")
     stop_owned()
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 3147))
+    assert_port_free()
     check("owned gateway shutdown frees port")
     result["ok"] = True
 except Exception as error:
