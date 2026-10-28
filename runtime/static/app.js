@@ -625,6 +625,10 @@ views.services = async v => {
       <div class="row end">${edit ? lnk('#/services', 'Cancel') : ''}<button type="submit" class="primary">Save service</button></div></form>`, 'c8')}
       ${card('Designed to run elsewhere', H`<div class="note-icon">↗</div><h3>One dashboard. Your whole fleet.</h3><p class="muted">Host a stdio MCP on an Oracle VM, publish another through Cloudflare, and keep a private Tailscale service on your laptop.</p><hr class="sep"><h3>Local access is your choice</h3><p class="muted">Disabling the controller’s shell leaves remote services available. A worker exposes only the MCP you configure.</p><hr class="sep"><h3>Existing routes stay yours</h3><p class="muted">Choose a free HTTPS port. Loopback refuses to replace existing listeners, including your orchestration endpoint.</p><a class="btn sm" href="#/topology">Explore topology ↗</a>`, 'c4')}
     </div>`);
+  if (edit && b.name) {
+    $('[data-form="binding"]')?.scrollIntoView?.({block: 'start'});
+    $('#f_port')?.focus?.();
+  }
   v.poll(5000, async () => { const data = await get('/api/admin/workers'); if (v.alive()) $('#service-list').innerHTML = String(drawRows(data)); stamp(); });
 };
 C['binding-transport'] = t => { $('#http-fields').hidden = t.value !== 'http'; $('#stdio-fields').hidden = t.value !== 'stdio'; };

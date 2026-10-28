@@ -13,26 +13,36 @@ assert.ok(start >= 0 && end > start);
 const renderValue = value => Array.isArray(value) ? value.map(renderValue).join('') : value ?? '';
 const H = (parts, ...values) => parts.reduce((out, part, i) => out + part + renderValue(values[i]), '');
 
-async function services(worker, binding = { desired: 'running' }) {
+async function services(worker, binding = { desired: 'running' }, query = '') {
   const service = { name: 'echo', target: 'remote', transport: 'stdio', port: 3031, exposure: 'private', ...binding };
   const data = { bindings: [service], workers: [{ target: 'remote', ...worker }] };
-  let html, poll, tableHtml;
+  let html, poll, tableHtml, scrolled = false, focused = false;
   const context = {
     views: {}, get: async url => url.endsWith('/workers') ? data : { targets: [] }, soft: async () => null, discoveryHtml: () => '',
     arr: value => value.targets || [], H, raw: value => value, enc: encodeURIComponent,
     table: (heads, rows) => renderValue(rows), st: value => value, badge: value => value,
     head: () => '', card: (title, body) => body, errBox: '',
     fld: () => '', inp: () => '', opt: () => '', chk: () => '', lnk: () => '',
-    $: () => ({ set innerHTML(value) { tableHtml = value; } }), stamp() {},
+    $: selector => ({ set innerHTML(value) { tableHtml = value; },
+      scrollIntoView() { if (selector === '[data-form="binding"]') scrolled = true; },
+      focus() { if (selector === '#f_port') focused = true; } }), stamp() {},
   };
   vm.runInNewContext(source.slice(start, end), context);
   await context.views.services({
-    params: new URLSearchParams(), render: value => { html = value; }, alive: () => true,
+    params: new URLSearchParams(query), render: value => { html = value; }, alive: () => true,
     poll: (ms, callback) => { assert.equal(ms, 5000); poll = callback; },
   });
-  return { html, data, async refresh() { await poll(); return tableHtml; } };
+  return { html, data, scrolled, focused, async refresh() { await poll(); return tableHtml; } };
 }
 const actions = html => [...html.matchAll(/data-action="(start|stop)"/g)].map(match => match[1]);
+
+test('Edit brings the selected service editor into view and focuses its port', async () => {
+  const view = await services({ status: 'healthy', bindings: [] }, { desired: 'stopped' }, 'edit=echo');
+  assert.equal(view.scrolled, true);
+  assert.equal(view.focused, true);
+  const normal = await services({ status: 'healthy', bindings: [] });
+  assert.equal(normal.scrolled, false);
+});
 
 test('a stopped process with running desired state can restart and still stop for editing', async () => {
   const view = await services({ status: 'healthy', bindings: [{ name: 'echo', running: false }] });

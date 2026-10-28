@@ -33,6 +33,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from ngrok_provider import NgrokMixin
 from typing import Any
 
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
@@ -240,8 +241,6 @@ def parse_serve_status(data: Any, https_port: int, local_port: int) -> dict[str,
 
 
 # --------------------------------------------------------------------------- manager
-from ngrok_provider import NgrokMixin
-
 
 class IngressManager(NgrokMixin):
     """Status, apply, diagnostics and process management for ingress paths."""

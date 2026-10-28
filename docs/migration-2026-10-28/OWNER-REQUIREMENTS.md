@@ -1,3 +1,5 @@
+> Historical migration snapshot. See [the resumed engineering checkpoint](../CONTINUATION-2026-10-28-RESUMED.md) for implementation after PR 9.
+
 # Owner requirements and acceptance map — 28 October 2026
 
 This is the full scope to preserve. PR 8 fixes a smaller subset. Its merge does not complete these requirements.

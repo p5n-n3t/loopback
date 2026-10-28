@@ -19,6 +19,9 @@ class DashboardTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.client_cm.__exit__(None, None, None)
 
+    def setUp(self):
+        self.c.cookies.clear()
+
     def test_shell_requires_session(self):
         r = self.c.get("/admin", follow_redirects=False)
         self.assertEqual(r.status_code, 303)
@@ -35,7 +38,7 @@ class DashboardTests(unittest.TestCase):
         self.assertNotIn("<script>", r.text)
         self.assertNotIn("onclick=", r.text)
         self.assertNotIn(self.server.AUTH.machine_token, r.text)
-        for needle in ("Recent MCP activity", "Persistent terminals", "Nodes", "Topology", "Filesystem", "Tailscale", "Cloudflare"):
+        for needle in ("Recent MCP activity", "Persistent terminals", "Nodes", "Topology", "Filesystem", "Tailscale", "Public tunnels"):
             self.assertIn(needle, r.text)
         self.c.get("/admin/logout")
 
@@ -53,7 +56,7 @@ class DashboardTests(unittest.TestCase):
             self.assertNotIn("class AuthStore", r.text, bad)
             if "%2" in bad or ".hidden" in bad or bad.endswith(".py") and ".." not in bad:
                 self.assertIn(r.status_code, {400, 404}, bad)
-        total = sum(len(self.c.get(f"/admin/static/{n}").content) for n in ("index.html", "app.css", "app.js", "topology.js"))
+        total = sum(len(self.c.get(f"/admin/static/{n}").content) for n in ("index.html", "app.css", "app.js", "topology.js", "dotrix.js"))
         self.assertLess(total, 256 * 1024, "dashboard bundle must stay small")
 
     def test_login_page_mentions_enrollment_when_no_password(self):
