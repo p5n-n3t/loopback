@@ -1,5 +1,20 @@
 # Resumed engineering checkpoint — 28 October 2026
 
+## ChatGPT CIMD correction
+
+The owner reports `invalid_client_metadata` after the desktop upgrade.
+ChatGPT's public document at `https://chatgpt.com/oauth/client.json` prefers `private_key_jwt` and offers `none`.
+The previous resolver ignores the plural alternatives and reproduces the reported error.
+The candidate correction selects `none` from an explicit CIMD offer.
+Malformed alternatives and offers without `none` remain invalid.
+DCR remains unchanged. Token and revocation endpoints reject unsupported client assertions before consuming grants.
+The tests use a saved public metadata fixture with local consent, PKCE, refresh, MCP access, and revocation.
+All 230 tests pass. Ruff, compilation, and the high-severity Bandit check pass.
+Real HTTP requests fetch ChatGPT's document and complete consent, exchange, refresh, MCP discovery, and revocation in an isolated gateway.
+[Sanitized CIMD evidence](proof/CHATGPT-CIMD-2026-10-28.json) records these results and their limits.
+The deployed desktop remains at source `41a7c0f` until the owner repeats the supported updater.
+Actual ChatGPT browser authorization remains unverified until that update and retry.
+
 ## Current rollout — 15:57 UTC
 
 The owner deploys source `41a7c0f` on the desktop through the supported local updater.

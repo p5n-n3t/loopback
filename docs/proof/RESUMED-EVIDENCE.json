@@ -9,13 +9,13 @@
     {
       "label": "Login \u2014 Dashboard Account Mobile",
       "path": "/admin/login",
-      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/Qp4x7hYAzng7QNt1zMtMU.png",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/wkMC6slTxr-uC3fu3M4xN.png",
       "status": "ok"
     },
     {
       "label": "Authentication \u2014 Account And Setup Key",
       "path": "/admin#/auth",
-      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/4PnKOGjxnFTfYIOgriI2c.png",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/YAqXB92RgEx40GUSx9tOz.png",
       "status": "ok"
     },
     {
@@ -33,7 +33,7 @@
     {
       "label": "OAuth \u2014 Consent With Setup Key",
       "path": "/oauth/authorize (sandbox fixture)",
-      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/9pD-z5xpjc5QyqRlUDaMa.png",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/xsklUYhPxxWN4OSV8RduV.png",
       "status": "ok"
     },
     {
@@ -58,7 +58,7 @@
   "flow_charts": [
     {
       "label": "Account Setup \u2014 Verified Flow",
-      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/2kHF7BLbnG5SFH23Iqs3c.png"
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/qgCJx1kCTzCUw1Az3oMdS.png"
     },
     {
       "label": "Ngrok Lifecycle \u2014 Verified Flow",
@@ -131,9 +131,18 @@
     "cloudflare": "Default Python user-agent receives error 1010; descriptive Loopback user-agent returns 200. No policy changes.",
     "verification": {
       "label": "Rollout \u2014 Desktop And Ora8",
-      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/Q7lff_0ZSa5udngK1XQac.png",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/JDRTeSsykbznY9awMmh0v.png",
       "met": 6,
-      "unverified": 2
+      "unverified": 3
     }
+  },
+  "cimd_correction": {
+    "result": "docs/proof/CHATGPT-CIMD-2026-10-28.json",
+    "suite": 230,
+    "contracts": 20,
+    "visual": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/RqAGebhzTqd79zT5Fs08G.png",
+    "flow": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/v0G6D4NgrWVQvGA4HblOx.png",
+    "scope": "Real ChatGPT public metadata fetched by isolated gateway. Seeded consent credential. Actual owner ChatGPT callback and desktop deployment remain open.",
+    "rendering": "Server-side screenshots. Local Mermaid charts and an illustrative HTML expectation sheet."
   }
 }

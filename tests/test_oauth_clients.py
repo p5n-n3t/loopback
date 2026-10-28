@@ -10,13 +10,24 @@ from __future__ import annotations
 
 import base64
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from helpers import consent_fields, fresh_config_dir, load_server, pkce_pair
+from auth import AuthError
 
 from starlette.testclient import TestClient
 
 RESOURCE = "http://127.0.0.1:2026/mcp"
 REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
+CIMD_ID = "https://chatgpt.com/oauth/client.json"
+# Public metadata fetched on 28 October 2026. No client credentials are included.
+CHATGPT_CIMD = {
+    "client_id": CIMD_ID, "client_name": "ChatGPT", "redirect_uris": [REDIRECT],
+    "token_endpoint_auth_method": "private_key_jwt",
+    "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"],
+    "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"],
+    "jwks_uri": "https://chatgpt.com/oauth/jwks.json",
+}
 
 
 def basic(cid: str, secret: str) -> dict[str, str]:
@@ -212,6 +223,73 @@ class OAuthClientContractTests(unittest.TestCase):
             self.server.AUTH.register_client({"redirect_uris": [REDIRECT], "token_endpoint_auth_method": "client_secret_post"},
                                              kind="cimd", client_id="https://example.com/client")
         self.assertIn("public clients", str(ctx.exception))
+
+    def test_chatgpt_cimd_offer_reaches_consent_and_uses_public_pkce_flow(self):
+        verifier, challenge = pkce_pair()
+        with patch("auth_http._fetch_client_metadata_document", new=AsyncMock(return_value=dict(CHATGPT_CIMD))) as fetch:
+            code = self.code_for(CIMD_ID, challenge)
+        fetch.assert_awaited_once()
+        client = self.server.AUTH.get_client(CIMD_ID)
+        self.assertEqual(client["token_endpoint_auth_method"], "none")
+        self.assertFalse(client["confidential"])
+        r = self.c.get("/oauth/authorize", params={"client_id": CIMD_ID, "redirect_uri": REDIRECT,
+                                                 "response_type": "code", "resource": RESOURCE}, follow_redirects=False)
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("error=invalid_request", r.headers["location"])
+        self.assertIn("PKCE", r.headers["location"])
+        form = {"grant_type": "authorization_code", "client_id": CIMD_ID, "code": code,
+                "code_verifier": verifier, "redirect_uri": REDIRECT, "resource": RESOURCE}
+        # An unverified assertion must not count as authentication or consume the code.
+        r = self.c.post("/oauth/token", data={**form, "client_assertion": "unverified",
+                                             "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"})
+        self.assertEqual(r.status_code, 401, r.text)
+        r = self.c.post("/oauth/token", data=form)
+        self.assertEqual(r.status_code, 200, r.text)
+        refresh = {"grant_type": "refresh_token", "client_id": CIMD_ID,
+                   "refresh_token": r.json()["refresh_token"], "resource": RESOURCE}
+        r = self.c.post("/oauth/token", data=refresh)
+        self.assertEqual(r.status_code, 200, r.text)
+        tokens = r.json()
+        rpc = self.c.post("/mcp", headers={"Authorization": "Bearer " + tokens["access_token"],
+                                           "Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-06-18"},
+                          json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+        self.assertEqual(rpc.status_code, 200, rpc.text)
+        self.assertTrue(rpc.json()["result"]["tools"])
+        revoke = {"client_id": CIMD_ID, "token": tokens["refresh_token"]}
+        r = self.c.post("/oauth/revoke", data={**revoke, "client_assertion_type": "unsupported"})
+        self.assertEqual(r.status_code, 401, r.text)
+        self.assertEqual(self.c.post("/oauth/revoke", data=revoke).status_code, 200)
+        r = self.c.post("/oauth/token", data={**refresh, "refresh_token": tokens["refresh_token"]})
+        self.assertEqual(r.status_code, 400)
+
+    def test_cimd_plural_methods_require_a_nonempty_string_array(self):
+        for offered in (None, [], "none", {"none": True}, [None], [""], ["none", 1]):
+            with self.subTest(offered=offered):
+                with self.assertRaises(AuthError) as ctx:
+                    self.server.AUTH.register_client({**CHATGPT_CIMD, "token_endpoint_auth_methods_supported": offered},
+                                                     kind="cimd", client_id=CIMD_ID)
+                self.assertIn("token_endpoint_auth_methods_supported", str(ctx.exception))
+
+    def test_cimd_without_a_shared_public_method_is_rejected(self):
+        for preferred in ("none", "private_key_jwt"):
+            with self.subTest(preferred=preferred):
+                with self.assertRaises(AuthError) as ctx:
+                    self.server.AUTH.register_client({**CHATGPT_CIMD, "token_endpoint_auth_method": preferred,
+                                                     "token_endpoint_auth_methods_supported": ["private_key_jwt"]},
+                                                     kind="cimd", client_id=CIMD_ID)
+                self.assertIn("must offer none", str(ctx.exception))
+
+    def test_legacy_cimd_singular_none_still_works(self):
+        doc = {k: v for k, v in CHATGPT_CIMD.items() if k != "token_endpoint_auth_methods_supported"}
+        doc["token_endpoint_auth_method"] = "none"
+        record = self.server.AUTH.register_client(doc, kind="cimd", client_id="https://example.com/legacy-client.json")
+        self.assertEqual(record["token_endpoint_auth_method"], "none")
+
+    def test_dcr_does_not_negotiate_away_a_required_authentication_method(self):
+        r = self.register(token_endpoint_auth_method="private_key_jwt",
+                          token_endpoint_auth_methods_supported=["none", "private_key_jwt"])
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["error"], "invalid_client_metadata")
 
 
 if __name__ == "__main__":

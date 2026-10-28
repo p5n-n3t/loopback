@@ -12,7 +12,14 @@ Read [the rollout evidence](docs/proof/ROLLOUT-2026-10-28.json) and [the current
 
 ## Validation
 
-- All 225 local tests and PR 10 CI pass at the implementation revision.
+The owner reports `invalid_client_metadata` during ChatGPT web authorization.
+ChatGPT's published CIMD document offers `none` but prefers `private_key_jwt`.
+The candidate fix selects the shared public method. It preserves PKCE and rejects unsupported JWT assertions.
+All 230 tests pass. Real HTTP consent, exchange, refresh, MCP access, and revocation pass in an isolated gateway.
+Read [the CIMD evidence](docs/proof/CHATGPT-CIMD-2026-10-28.json).
+This fix still needs the desktop updater and an actual ChatGPT browser retry.
+
+- All 230 local tests pass with the CIMD correction. The prior revision passes PR 10 CI.
 - The separate ora8 lab run passes all 13 checks, including real OAuth/MCP, recovery, upgrade, rollback, and cleanup.
 - Public health and OAuth metadata return 200 with a descriptive Loopback user-agent.
 - Cloudflare rejects Python's default user-agent with error 1010. No Cloudflare setting changes occur.

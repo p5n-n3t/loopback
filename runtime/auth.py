@@ -477,7 +477,8 @@ class AuthStore:
           Confidential methods are only available to DCR clients (``kind == "dcr"``): the
           server mints the secret, discloses it once in the registration response and stores
           only its hash. Client ID Metadata Documents cannot receive a secret, so they stay
-          public.
+          public. A CIMD plural offer selects ``none`` when the client explicitly supports it.
+          The legacy singular field remains binding when no plural offer is present.
         * ``grant_types``: narrowed to the supported subset (RFC 7591 §3.2.1 permits the
           server to substitute requested metadata). ``authorization_code`` must survive the
           narrowing. ``client_credentials``, ``implicit`` and ``password`` are never enabled.
@@ -489,7 +490,17 @@ class AuthStore:
         for uri in redirect_uris:
             if not isinstance(uri, str) or not redirect_uri_allowed(uri):
                 raise AuthError("invalid_redirect_uri", f"redirect URI not permitted: {uri!r}")
-        auth_method = metadata.get("token_endpoint_auth_method") or "none"
+        if kind == "cimd" and "token_endpoint_auth_methods_supported" in metadata:
+            # CIMD clients advertise alternatives. Their singular field is only a preference.
+            # Local policy supports public CIMD clients, so the permitted intersection is none.
+            offered = metadata["token_endpoint_auth_methods_supported"]
+            if not isinstance(offered, list) or not offered or not all(isinstance(m, str) and m for m in offered):
+                raise AuthError("invalid_client_metadata", "token_endpoint_auth_methods_supported must be a nonempty array of strings")
+            if "none" not in offered:
+                raise AuthError("invalid_client_metadata", "public CIMD clients must offer none in token_endpoint_auth_methods_supported")
+            auth_method = "none"
+        else:
+            auth_method = metadata.get("token_endpoint_auth_method") or "none"
         if auth_method not in CLIENT_AUTH_METHODS:
             raise AuthError("invalid_client_metadata",
                             "token_endpoint_auth_method must be one of: " + ", ".join(CLIENT_AUTH_METHODS))

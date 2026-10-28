@@ -126,6 +126,21 @@ metadata advertises all three auth methods for both endpoints. Rotate a secret
 with `AuthStore.rotate_client_secret(client_id)`; the dashboard client list shows
 each client's auth method and grants.
 
+### CIMD authentication methods
+
+CIMD clients can list alternatives in `token_endpoint_auth_methods_supported`.
+Loopback selects `none` when that list contains it. The singular
+`token_endpoint_auth_method` expresses a preference when alternatives exist.
+This permits ChatGPT's document to prefer `private_key_jwt` and offer `none`.
+See [OpenAI's CIMD authentication contract](https://developers.openai.com/plugins/build/auth).
+
+The alternatives must form a nonempty array of nonempty strings.
+Loopback rejects a CIMD document that offers no shared public method.
+Without an alternatives field, the singular method retains its existing behavior.
+DCR retains its singular registration contract. Loopback does not support JWT
+client assertions and rejects them at the token and revocation endpoints.
+PKCE, exact redirect matching, resource checks, and explicit consent still apply.
+
 ## Authorization code + PKCE
 
 ```

@@ -301,6 +301,8 @@ def authenticate_client(ctx: AppContext, request: Request, form: Any) -> dict[st
     checked in constant time before any code or refresh token is consumed, so a failed
     attempt never burns a grant. Raises ``ClientAuthFailure`` (→ 401 ``invalid_client``).
     """
+    if "client_assertion" in form or "client_assertion_type" in form:
+        raise ClientAuthFailure("client assertions are not supported; use the registered authentication method", method="private_key_jwt")
     basic = _basic_credentials(request)
     form_id = str(form.get("client_id") or "")
     form_secret = str(form.get("client_secret") or "")
