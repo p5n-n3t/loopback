@@ -26,7 +26,7 @@ The isolated install/health/MCP-execute/status/report/shutdown smoke test passes
 Ruff passes. Bandit reports no medium/high findings. JavaScript syntax and diff checks pass.
 Six server-side screenshots succeed in one batch. No screenshot retries or videos occur.
 The images are visually inspected as one contact sheet. They cover login mobile, account/setup keys, public tunnels, wizard choices, consent, and Services Edit.
-Flow charts and CLI expectation evidence remain unfinished at this checkpoint. Do not repeat the six captures unless their rendering sources change.
+The later final milestone below supersedes this earlier proof-progress note.
 
 No desktop/VM deployment, service restart, route edit, or credential rotation occurred.
 Real browser ChatGPT/Claude consent and ngrok provider-account connectivity remain unverified.
@@ -35,11 +35,9 @@ Only the eight matching DOTRIX assets replace corresponding glyphs. Other icons 
 
 ## Next steps
 
-1. Finish compact logic proof and the CLI expectation sheet. The six current UI captures already succeed.
-   Twelve superseded artifacts are removed from the active verification set. Their links remain in the historical evidence files.
-   The historical migration Page remains registered. Decide whether to retain it as explicitly historical or remove its registration.
-2. Commit and push final verified state and update this checkpoint.
-3. Deliver precise deployment steps. Do not claim preview changes are installed on the owner computer.
+1. Review the saved continuation branch. PRs 8 and 9 are merged, but these later commits are not on main.
+2. Arrange owner deployment and real client acceptance. Use the owner terminal and supported updater below.
+3. Register ora8 only after its SSH account and access details are confirmed.
 
 ## Remaining external acceptance
 
@@ -78,10 +76,73 @@ Read `CONTINUE-HERE.md` first, then this checkpoint. Avoid replaying the old mig
   The initial export returned HTTP 403 `Invalid token`. The owner's reconnection restores access.
   A fresh PNG export now succeeds. The hosted asset replaces navigation, login, and consent wordmarks.
   Source raster size is 1029 by 377. The raster stays outside Git. The hosted URL is in the Figma manifest.
-  The new 32px display height preserves readability. A single refresh of the six affected views is pending.
+  The new 32px display height preserves readability. All six affected views are refreshed and visually inspected.
 - The owner adds a new VM, `ora8`, to the intended fleet scope.
   Fresh read-only Tailscale status confirms it is online at `100.105.169.121`, DNS `ora8.bigeye-escalator.ts.net.`.
   Its IPv6 is `fd7a:115c:a1e0::8d29:a97a`.
   The managed SSH target list still contains only ora1/3/5/6/7/aws1/aws2. ora8 is not registered or installed as a worker.
   Obtain or confirm SSH access details before registration or rollout. Do not guess the login account or deploy automatically.
   This observation contacts no service on ora8. ora2 and ora4 remain excluded.
+
+## Final local milestone — 07:23 UTC
+
+Implementation revision: `e9dbb73`. Later documentation commits update this ledger and evidence links only.
+Two explicit GPT-6 Luna agents complete independent, bounded audits of discovery/metrics and requirements 2/4/5/7/8/13.
+Neither audit identifies a confirmed remaining in-scope code defect. No Astra escalation is necessary.
+This result does not establish unavailable provider-client or production deployment acceptance.
+
+The latest asset passes 30 auth and four dashboard tests. An initial test command uses an invalid module path.
+The corrected discovery commands pass. This is a test invocation issue, not an application failure.
+The earlier 223-test full suite and real isolated smoke remain valid for the unchanged integration logic.
+
+Proof runs `/visual-proof`, `/logic-proof`, and `/expect-proof`.
+The set contains six current UI stills, three source flow charts, and one CLI expectation sheet.
+The wordmark requires one six-view refresh after the initial six captures. There are no retries or videos.
+All images are visually inspected. The CLI sheet has six Met expectations and one Unverified owner-terminal/deployment expectation.
+Provider process tests use mocks. Consent uses a sandbox client. Real terminal output uses labelled sample report data.
+Every changed logic flow has named local test/runtime evidence. Real provider-account and browser acceptance remain open.
+Thirteen superseded artifacts leave the active set. Their historical URLs remain in the evidence files.
+No new Page is published. Read `docs/proof/RESUMED-EVIDENCE.json` for current hosted links.
+
+### Current requirement status
+
+| Requirement | Saved state and remaining boundary |
+| --- | --- |
+| 1 DOTRIX | Eight licensed directory geometries are imported. Remaining unmatched icons retain existing code-native fallbacks. |
+| 2 Tunnel evaluation | Primary-source evaluation and fixed-host ngrok support complete. Live account acceptance remains open. |
+| 3 Discovery before setup | Bounded local inventory and contextual setup choices complete. Inventory does not connect to SSH hosts. |
+| 4 Client parity/refusal | Capability investigation documented. Actual refusal payloads and browser sessions remain unavailable. No parity or refusal fix is claimed. |
+| 5 Provider controls | Cloudflare and fixed-host ngrok controls complete. Localtunnel/tunnelto acceptance is not established. |
+| 6 Shield | Preserved from merged PR 9 with its regression coverage. No production activation changes occur here. |
+| 7 Dashboard account | Separate username/password, compatible migration, guarded edits and session revocation complete. |
+| 8 Setup key | Hashed reusable consent-only key, rotation and separate grant semantics complete. External consent acceptance remains open. |
+| 9 Services | Existing Connect behavior preserved. Edit scroll/focus corrected and tested. |
+| 10 Discovery | Preserved PR 9 registered-target discovery and ownership. ora8 must first become a registered target/worker. |
+| 11 Metrics | Preserved PR 9 whole-host sampling and explicit unavailable states. Owner desktop is still undeployed. |
+| 12 Branding | Latest Figma wordmark, symbol, gradients, login and eight DOTRIX glyphs integrated. |
+| 13 CLI | Help, human reports, explicit JSON, progress, preflight and settings validation complete. |
+
+### Owner-controlled deployment path
+
+Run these commands only in the owner's normal terminal when ready to deploy. They are not executed in this session.
+Use a new checkout directory. If the chosen directory exists, inspect it rather than overwrite it.
+
+```bash
+git clone --single-branch --branch ls/16-review-handoff-and-update-dashboard-desi-1o9R https://github.com/p5n-n3t/loopback.git "$HOME/loopback-continuation-review"
+loopback upgrade --source "$HOME/loopback-continuation-review" --check
+```
+
+The `--check` path prints the plan and returns before backup, stop, or runtime replacement.
+Inspect the source revision and displayed configuration path. Preserve the existing desktop account and state.
+When the owner approves that plan, the supported updater is:
+
+```bash
+loopback upgrade --source "$HOME/loopback-continuation-review"
+loopback doctor
+loopback report
+```
+
+The updater requests confirmation, creates a state backup, stages the runtime, verifies it, and rolls back a failed upgrade.
+These commands do not install workers on ora8 or other hosts. Do not reset Tailscale or RotoXY routes.
+If the executable or configuration path differs on the owner machine, inspect that installation before any write.
+The protected runtime directory is not accessible through this MCP shell. Do not weaken its sandbox to deploy.

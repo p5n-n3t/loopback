@@ -1,53 +1,49 @@
 {
   "date_utc": "2026-10-28",
-  "source_commit": "5ebbbfd51ea13fba44c10a213c07d2e0cf185532",
+  "source_commit": "e9dbb73",
   "scope": "Isolated real application, test account and consent client. No production rollout, real provider sign-in, or live ngrok account is verified.",
-  "capture_attempts": 6,
+  "capture_attempts": 12,
   "capture_failures": 0,
   "videos": 0,
   "screenshots": [
     {
       "label": "Login \u2014 Dashboard Account Mobile",
       "path": "/admin/login",
-      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/Z_AdVAPYY6t0W3Mtu831a.png",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/Qp4x7hYAzng7QNt1zMtMU.png",
       "status": "ok"
     },
     {
       "label": "Authentication \u2014 Account And Setup Key",
       "path": "/admin#/auth",
-      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/G97vDptla1XFl0STj8yII.png",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/4PnKOGjxnFTfYIOgriI2c.png",
       "status": "ok"
     },
     {
       "label": "Public Tunnels \u2014 Fixed Ngrok Configuration",
       "path": "/admin#/cloudflare",
-      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/Yjz8PyGZ0TifB8ZT3uS0h.png",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/yxzpcFl2fVSubrK5aJ--m.png",
       "status": "ok"
     },
     {
       "label": "Setup \u2014 Exposure Choices",
       "path": "/admin#/welcome?step=1",
-      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/GA8iqtwjJcdbzmCWQKoGJ.png",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/j941C40Hl-KnRMSCcpc9A.png",
       "status": "ok"
     },
     {
       "label": "OAuth \u2014 Consent With Setup Key",
       "path": "/oauth/authorize (sandbox fixture)",
-      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/s4h9GjzTCf3IRhQnp7L8V.png",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/9pD-z5xpjc5QyqRlUDaMa.png",
       "status": "ok"
     },
     {
       "label": "Services \u2014 Edit Focus And Recovery",
       "path": "/admin#/services?edit=recovery-demo",
-      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/UKipwGkIuu3SKbF8mQy5p.png",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/pKpYz-PPzp9GIpbuxFvC7.png",
       "status": "ok"
     }
   ],
-  "remaining_proof": [
-    "Compact logic flow charts with test evidence",
-    "CLI/document expectation sheet",
-    "Final verification reconciliation and staleCount check"
-  ],
+  "remaining_proof": [],
   "historical_delivery": [
     {
       "label": "Migration Handoff \u2014 Document Expectations",
@@ -57,5 +53,40 @@
       "label": "Loopback \u2014 Migration Handoff",
       "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/Jc8Ux0WxGwIwzR6VclJcq.png"
     }
+  ],
+  "capture_note": "Six initial captures plus one six-view refresh required by the latest wordmark source change. Zero retries and zero videos.",
+  "flow_charts": [
+    {
+      "label": "Account Setup \u2014 Verified Flow",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/2kHF7BLbnG5SFH23Iqs3c.png"
+    },
+    {
+      "label": "Ngrok Lifecycle \u2014 Verified Flow",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/rcNwhKt5-SWy9vgtr1pwa.png"
+    },
+    {
+      "label": "Installation \u2014 Verified Flow",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/qgWiPMCuomS-wWhf0FDh3.png"
+    }
+  ],
+  "expectations": {
+    "label": "CLI And Installer \u2014 Expectations",
+    "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/w8_5B1i9D-zzLd1nH_QN6.png",
+    "met": 6,
+    "unverified": [
+      "Owner terminal rendering and desktop rollout"
+    ],
+    "evidence_revision": "e9dbb73",
+    "source_links": [
+      "https://github.com/p5n-n3t/loopback/blob/e9dbb73/runtime/cli.py#L182",
+      "https://github.com/p5n-n3t/loopback/blob/e9dbb73/tests/test_installer_workflows.py#L66"
+    ],
+    "render_note": "Real CLI help/report output with labelled sample data in illustrative HTML. No app route renders terminal UI."
+  },
+  "open_acceptance": [
+    "Actual ChatGPT and Claude registration, consent, refresh and reconnect",
+    "Live ngrok account and end-to-end public transport",
+    "Owner desktop/worker deployment and actual terminal rendering",
+    "ora8 SSH details, registration and worker rollout"
   ]
 }
