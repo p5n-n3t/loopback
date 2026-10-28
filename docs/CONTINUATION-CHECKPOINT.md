@@ -1,3 +1,5 @@
+> Latest continuation: [resumed engineering checkpoint](CONTINUATION-2026-10-28-RESUMED.md). Start there. This file is historical context.
+
 > Superseded for continuation by [HANDOFF-2026-10-28.md](HANDOFF-2026-10-28.md). This file remains historical evidence.
 
 # Loopback continuation checkpoint

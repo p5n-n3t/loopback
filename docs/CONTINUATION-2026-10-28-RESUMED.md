@@ -24,7 +24,9 @@ Installer tests: 8 pass. CLI startup tests: 8 pass. Dashboard Node wrappers: 4 p
 All 223 Python tests pass, including Node wrappers. The later Edit change passes all six focused Services Node tests.
 The isolated install/health/MCP-execute/status/report/shutdown smoke test passes.
 Ruff passes. Bandit reports no medium/high findings. JavaScript syntax and diff checks pass.
-Final proof is the remaining step at this checkpoint.
+Six server-side screenshots succeed in one batch. No screenshot retries or videos occur.
+The images are visually inspected as one contact sheet. They cover login mobile, account/setup keys, public tunnels, wizard choices, consent, and Services Edit.
+Flow charts and CLI expectation evidence remain unfinished at this checkpoint. Do not repeat the six captures unless their rendering sources change.
 
 No desktop/VM deployment, service restart, route edit, or credential rotation occurred.
 Real browser ChatGPT/Claude consent and ngrok provider-account connectivity remain unverified.
@@ -33,7 +35,9 @@ Only the eight matching DOTRIX assets replace corresponding glyphs. Other icons 
 
 ## Next steps
 
-1. Refresh only required proof. Preserve historical image links and consolidate superseded artifacts.
+1. Finish compact logic proof and the CLI expectation sheet. The six current UI captures already succeed.
+   Twelve superseded artifacts are removed from the active verification set. Their links remain in the historical evidence files.
+   The historical migration Page remains registered. Decide whether to retain it as explicitly historical or remove its registration.
 2. Commit and push final verified state and update this checkpoint.
 3. Deliver precise deployment steps. Do not claim preview changes are installed on the owner computer.
 
@@ -47,3 +51,23 @@ Only the eight matching DOTRIX assets replace corresponding glyphs. Other icons 
 - ora2 and ora4 remain excluded. This continuation contacts neither host.
 
 Use Sol for remaining integration. Astra is not needed on current evidence.
+
+## Recovery checkpoint — 07:05 UTC
+
+Latest verified implementation revision: `5ebbbfd51ea13fba44c10a213c07d2e0cf185532`.
+All code is committed and pushed. This checkpoint update contains documentation only.
+The current screenshot index is `docs/proof/RESUMED-EVIDENCE.json`. It contains hosted image links, not inline image data.
+Do not infer deployment from these captures. They render the isolated sandbox.
+
+Sandbox-only runtime: `/tmp/loopback-recovery-proof`, real server on declared `dev` port 3000.
+The current server is the process identified by that directory's `server.pid`, started by this run.
+Port 3031's isolated recovery-demo worker is intentionally stopped for port-sensitive tests. Do not stop unrelated processes.
+The proof browser session is temporary. A new account must mint its own sandbox session by runtime/data means.
+Do not copy auth databases, tokens, or cookies into Git.
+
+The test interpreter is `/tmp/loopback-dashboard-venv/bin/python`.
+Ruff/Bandit run with `uv tool run ruff ...` and `uv tool run --from bandit bandit ...`.
+The local Mermaid renderer already exists in `/tmp/flow-diff`. Reuse it if available. Never install a browser for preview captures.
+
+A new account needs legitimate repository access. Git preserves this state. It does not transfer personal subscriptions or private workspace sessions.
+Read `CONTINUE-HERE.md` first, then this checkpoint. Avoid replaying the old migration documents or screenshot sweep.

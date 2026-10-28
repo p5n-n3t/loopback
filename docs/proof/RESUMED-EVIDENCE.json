@@ -1,0 +1,61 @@
+{
+  "date_utc": "2026-10-28",
+  "source_commit": "5ebbbfd51ea13fba44c10a213c07d2e0cf185532",
+  "scope": "Isolated real application, test account and consent client. No production rollout, real provider sign-in, or live ngrok account is verified.",
+  "capture_attempts": 6,
+  "capture_failures": 0,
+  "videos": 0,
+  "screenshots": [
+    {
+      "label": "Login \u2014 Dashboard Account Mobile",
+      "path": "/admin/login",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/Z_AdVAPYY6t0W3Mtu831a.png",
+      "status": "ok"
+    },
+    {
+      "label": "Authentication \u2014 Account And Setup Key",
+      "path": "/admin#/auth",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/G97vDptla1XFl0STj8yII.png",
+      "status": "ok"
+    },
+    {
+      "label": "Public Tunnels \u2014 Fixed Ngrok Configuration",
+      "path": "/admin#/cloudflare",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/Yjz8PyGZ0TifB8ZT3uS0h.png",
+      "status": "ok"
+    },
+    {
+      "label": "Setup \u2014 Exposure Choices",
+      "path": "/admin#/welcome?step=1",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/GA8iqtwjJcdbzmCWQKoGJ.png",
+      "status": "ok"
+    },
+    {
+      "label": "OAuth \u2014 Consent With Setup Key",
+      "path": "/oauth/authorize (sandbox fixture)",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/s4h9GjzTCf3IRhQnp7L8V.png",
+      "status": "ok"
+    },
+    {
+      "label": "Services \u2014 Edit Focus And Recovery",
+      "path": "/admin#/services?edit=recovery-demo",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/UKipwGkIuu3SKbF8mQy5p.png",
+      "status": "ok"
+    }
+  ],
+  "remaining_proof": [
+    "Compact logic flow charts with test evidence",
+    "CLI/document expectation sheet",
+    "Final verification reconciliation and staleCount check"
+  ],
+  "historical_delivery": [
+    {
+      "label": "Migration Handoff \u2014 Document Expectations",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/S3eih2vSXWCfu_AgfMndz.png"
+    },
+    {
+      "label": "Loopback \u2014 Migration Handoff",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/screenshots/U0KwdNIId2CEBU7bMC8S5/Jc8Ux0WxGwIwzR6VclJcq.png"
+    }
+  ]
+}
