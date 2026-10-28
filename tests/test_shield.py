@@ -262,3 +262,40 @@ class ShieldTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShieldServerIntegrationTests(unittest.TestCase):
+    """Shield mounted in the real gateway: throttles untrusted peers, surfaces analytics, never blocks health."""
+
+    @classmethod
+    def setUpClass(cls):
+        from helpers import fresh_config_dir, load_server
+        from starlette.testclient import TestClient
+
+        fresh_config_dir(shield={"enabled": True, "auth_per_minute": 4, "auth_burst": 2, "default_per_minute": 1000, "default_burst": 100})
+        cls.server = load_server()
+        cls.client_cm = TestClient(cls.server.app, base_url="http://127.0.0.1:2026", client=("203.0.113.9", 4321))
+        cls.c = cls.client_cm.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.client_cm.__exit__(None, None, None)
+
+    def test_register_budget_trips_and_health_and_analytics_survive(self):
+        statuses = [self.c.post("/oauth/register", json={"redirect_uris": ["https://example.com/cb"]}).status_code for _ in range(6)]
+        self.assertIn(429, statuses)
+        self.assertEqual(self.c.get("/healthz").status_code, 200)
+        self.assertEqual(self.c.get("/.well-known/oauth-authorization-server").status_code, 200)
+        self.assertIs(self.server.CTX.shield, self.server.app)
+        summary = self.server.CTX.shield.summary()
+        self.assertTrue(summary["enabled"])
+        self.assertGreaterEqual(summary["throttled_24h"], 1)
+        local = TestClient(self.server.app, base_url="http://127.0.0.1:2026")
+        local.post("/admin/login", data={"credential": self.server.AUTH.machine_token})
+        r = local.get("/api/admin/shield")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["summary"]["enabled"], True)
+        self.assertTrue(any(e["kind"] == "flood" and e["ip"] == "203.0.113.9" for e in r.json()["events"]))
+        graph = self.server.CTX.topology.build()
+        gateway = next(n for n in graph["nodes"] if n["id"] == "gateway")
+        self.assertEqual(gateway["detail"]["shield"]["id"], "shield")
