@@ -68,6 +68,16 @@ def default_config() -> dict[str, Any]:
             "allow_client_id_metadata_documents": True,
             "require_password_for_consent": True,
         },
+        "discovery": {  # read-only inventory of existing routes; listed targets are never contacted
+            "excluded_targets": [],
+        },
+        "shield": {  # unobtrusive endpoint protection (see runtime/shield.py for the full key set)
+            "enabled": True,
+            "trusted_proxies": ["127.0.0.1", "::1"],
+            "block_minutes": 15,
+            "retention_days": 30,
+            "max_tracked_ips": 5000,
+        },
         "sandbox": {
             "backend": "auto",  # auto | landlock | bwrap | sandbox-exec | none
             "require_enforcement": True,

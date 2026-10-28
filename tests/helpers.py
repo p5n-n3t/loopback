@@ -20,15 +20,22 @@ logging.disable(logging.CRITICAL)
 MCP_HEADERS = {"Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-06-18"}
 
 
-def fresh_config_dir() -> str:
-    """Point the runtime at an empty config dir and drop cached runtime modules."""
+def fresh_config_dir(**overrides) -> str:
+    """Point the runtime at an empty config dir and drop cached runtime modules.
+
+    Shield is disabled by default: the TestClient peer is not a trusted proxy, so the auth
+    budget would throttle a test class that registers and signs in dozens of times.
+    Pass ``shield={"enabled": True, ...}`` to exercise it through the real server.
+    """
     td = tempfile.mkdtemp(prefix="loopback-test-")
     os.environ["LOOPBACK_CONFIG_DIR"] = td
     # Keep tests offline and quiet: no update checks, no periodic probes.
     import json
 
+    config = {"schema_version": 2, "maintenance": {"update_channel": "off", "probe_interval_seconds": 0}, "shield": {"enabled": False}}
+    config.update(overrides)
     with open(os.path.join(td, "config.json"), "w", encoding="utf-8") as handle:
-        json.dump({"schema_version": 2, "maintenance": {"update_channel": "off", "probe_interval_seconds": 0}}, handle)
+        json.dump(config, handle)
     for name in ("server", "bootstrap", "fabric_api", "maintenance_api", "dashboard"):
         sys.modules.pop(name, None)
     return td

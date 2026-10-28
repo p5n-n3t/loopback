@@ -85,6 +85,7 @@ def build_context(config_dir: str | Path | None = None, *, start_managers: bool 
         ("workers", "workers", lambda m: m.WorkerManager(ctx)),
         ("ingress", "ingress", lambda m: m.IngressManager(ctx)),
         ("topology", "topology", lambda m: m.TopologyBuilder(ctx)),
+        ("discovery", "discovery", lambda m: m.DiscoveryService(ctx)),
         ("maintenance", "maintenance", lambda m: m.MaintenanceManager(ctx)),
     ):
         try:

@@ -40,6 +40,9 @@ class AppContext:
     browser: Any = None
     desktop: Any = None
     documents: Any = None
+    discovery: Any = None
+    shield: Any = None
+    tool_enabled: Callable[[str], bool] | None = None
     tool_catalog: Callable[[], list[dict[str, Any]]] | None = None
     version: str = ""
 

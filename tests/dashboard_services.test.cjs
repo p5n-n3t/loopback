@@ -18,7 +18,7 @@ async function services(worker, binding = { desired: 'running' }) {
   const data = { bindings: [service], workers: [{ target: 'remote', ...worker }] };
   let html, poll, tableHtml;
   const context = {
-    views: {}, get: async url => url.endsWith('/workers') ? data : { targets: [] },
+    views: {}, get: async url => url.endsWith('/workers') ? data : { targets: [] }, soft: async () => null, discoveryHtml: () => '',
     arr: value => value.targets || [], H, raw: value => value, enc: encodeURIComponent,
     table: (heads, rows) => renderValue(rows), st: value => value, badge: value => value,
     head: () => '', card: (title, body) => body, errBox: '',

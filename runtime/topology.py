@@ -319,6 +319,16 @@ class TopologyBuilder:
         except Exception:  # noqa: BLE001
             return []
 
+    def _shield_marker(self) -> dict[str, Any] | None:
+        """Endpoint-protection marker for the gateway node (None when Shield is not mounted)."""
+        shield = getattr(self.ctx, "shield", None)
+        if shield is None:
+            return None
+        try:
+            return shield.topology_marker()
+        except Exception:  # noqa: BLE001
+            return None
+
     def _fleet_nodes(self) -> list[dict[str, Any]]:
         fleet = getattr(self.ctx, "fleet", None)
         if fleet is None:
@@ -439,7 +449,8 @@ class TopologyBuilder:
             "detail": {"hostname": ident.hostname, "os": ident.os_release, "user": ident.username,
                        "platform": ident.platform, "arch": ident.arch, "machine_kind": machine_kind,
                        "port": int(cfg.get("port") or 2026), "bind": cfg.get("bind"), "version": ctx.version,
-                       "jobs_running": jobs.get("local", 0), "terminals_open": terminals},
+                       "jobs_running": jobs.get("local", 0), "terminals_open": terminals,
+                       "shield": self._shield_marker()},
         })
 
         # Clients ---------------------------------------------------------
@@ -611,12 +622,48 @@ class TopologyBuilder:
                               "status": "untested", "direct": True, "proxied": False,
                               "detail": {"note": "Direct to worker; public reachability has not been probed"}})
 
+        # Discovered routes (read-only inventory, cached; never probed here) ---------
+        discovery = getattr(ctx, "discovery", None)
+        inventory = discovery.cached() if discovery is not None else {"hosts": []}
+        known_hosts = {n["id"] for n in nodes}
+        for host in inventory.get("hosts") or []:
+            target = host.get("target")
+            host_node = "gateway" if target == "local" else f"ssh:{target}"
+            if host_node not in known_hosts:
+                continue
+            if host.get("status") == "unreachable":
+                for n in nodes:
+                    if n["id"] == host_node:
+                        n["detail"]["discovery"] = {"status": "unreachable", "error": host.get("error"), "last_known": host.get("last_known", False)}
+            for r in host.get("routes") or []:
+                if r.get("owner") == "managed" and r.get("owned_by") not in (None, "controller"):
+                    continue  # already drawn as a managed service / ingress node
+                if r.get("owned_by") == "controller":
+                    continue  # the configured ingress nodes above cover it
+                rid = "route:" + str(r["id"])
+                label = (r.get("hostname") or r.get("provider") or "route") + (f":{r['port']}" if r.get("port") not in (None, 443) else "") + (r.get("path") or "")
+                status = "stale" if host.get("status") == "unreachable" else ("healthy" if r.get("target") else "untested")
+                nodes.append({"id": rid, "type": "tunnel", "kind": "unknown", "label": label[:60], "group": target,
+                              "status": status, "ownership": r.get("owner"),
+                              "detail": {"provider": r.get("provider"), "mode": r.get("mode"), "exposure": r.get("exposure"),
+                                         "hostname": r.get("hostname"), "path": r.get("path"), "target": r.get("target"),
+                                         "owner": r.get("owner"), "owned_by": r.get("owned_by"), "kind": r.get("kind"),
+                                         "host": target, "note": r.get("note") or "Discovered route; Loopback does not manage it",
+                                         "observed_at": host.get("observed_at")}})
+                edges.append({"id": f"clients->{rid}", "from": "clients", "to": rid, "transport": r.get("provider"), "protocol": "https",
+                              "exposure": r.get("exposure"), "initiator": "clients", "direct": False, "proxied": True, "status": status,
+                              "detail": {"note": "External route observed on the host; reachability not probed"}})
+                edges.append({"id": f"{rid}->{host_node}", "from": rid, "to": host_node, "transport": r.get("provider"), "protocol": "http",
+                              "exposure": "local", "initiator": rid, "direct": True, "proxied": False, "status": status,
+                              "detail": {"target": r.get("target"), "note": "Handler target on the host"}})
+
         return {
             "generated_at": time.time(),
             "stale_after_seconds": self.stale_after_seconds,
             "nodes": nodes,
             "edges": edges,
-            "legend": {"statuses": list(STATUSES)},
+            "legend": {"statuses": list(STATUSES), "ownership": ["managed", "external", "unknown"]},
+            "discovery_generated_at": inventory.get("generated_at"),
         }
 
     # ---------------------------------------------------------------- probing

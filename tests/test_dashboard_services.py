@@ -14,6 +14,21 @@ class ServiceViewTests(unittest.TestCase):
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_overview_gauges(self):
+        result = subprocess.run([shutil.which('node'), '--test', str(Path(__file__).with_name('dashboard_overview.test.cjs'))],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_discovery_table(self):
+        result = subprocess.run([shutil.which('node'), '--test', str(Path(__file__).with_name('dashboard_discovery.test.cjs'))],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_tool_policy_controls(self):
+        result = subprocess.run([shutil.which('node'), '--test', str(Path(__file__).with_name('dashboard_tools.test.cjs'))],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()
