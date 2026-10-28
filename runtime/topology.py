@@ -319,6 +319,16 @@ class TopologyBuilder:
         except Exception:  # noqa: BLE001
             return []
 
+    def _shield_marker(self) -> dict[str, Any] | None:
+        """Endpoint-protection marker for the gateway node (None when Shield is not mounted)."""
+        shield = getattr(self.ctx, "shield", None)
+        if shield is None:
+            return None
+        try:
+            return shield.topology_marker()
+        except Exception:  # noqa: BLE001
+            return None
+
     def _fleet_nodes(self) -> list[dict[str, Any]]:
         fleet = getattr(self.ctx, "fleet", None)
         if fleet is None:
@@ -439,7 +449,8 @@ class TopologyBuilder:
             "detail": {"hostname": ident.hostname, "os": ident.os_release, "user": ident.username,
                        "platform": ident.platform, "arch": ident.arch, "machine_kind": machine_kind,
                        "port": int(cfg.get("port") or 2026), "bind": cfg.get("bind"), "version": ctx.version,
-                       "jobs_running": jobs.get("local", 0), "terminals_open": terminals},
+                       "jobs_running": jobs.get("local", 0), "terminals_open": terminals,
+                       "shield": self._shield_marker()},
         })
 
         # Clients ---------------------------------------------------------

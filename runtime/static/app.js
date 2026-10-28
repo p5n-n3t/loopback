@@ -961,7 +961,7 @@ A.bundle = async t => {
 
 /* -- Security */
 views.security = async v => {
-  const [policy, auth, sess] = await Promise.all([get('/api/admin/policy'), soft('/api/admin/auth'), session().catch(() => null)]);
+  const [policy, auth, sess, shield] = await Promise.all([get('/api/admin/policy'), soft('/api/admin/auth'), session().catch(() => null), soft('/api/admin/shield')]);
   const ta = (id, list, label) => H`<textarea id="${id}" name="${id}" aria-label="${label}" spellcheck="false">${arr(list).join('\n')}</textarea>`;
   v.render(H`${head('Security', 'Command rules, tool lists and session protection.')}
     <form data-form="security" class="grid"><div class="c12">${errBox}</div>
@@ -975,9 +975,23 @@ views.security = async v => {
     <div class="grid">
     ${card('Session & CSRF', kv([['Session cookie', H`<code>loopback_admin</code> · HttpOnly · SameSite=Strict`], ['CSRF protection', H`${badge('active', 'ok')} header <code>X-Loopback-CSRF</code> on every change`], ['Session expires', sess ? time(sess.expires_at) : null], ['Dashboard password', sess ? okb(sess.password_set, 'set', 'not set') : null], ['Content-Security-Policy', H`<code class="small">default-src 'self'; frame-ancestors 'none'</code>`]]), { cls: 'c6', actions: H`${lnk('#/auth', 'Sessions')}` })}
     ${card('Configuration rollback', H`<p class="muted">Restore the newest automatic backup of <code>config.json</code> (taken before every change).</p><div class="row end"><button class="danger" data-act="rollback">Roll back configuration</button></div>`)}
+    ${shieldCard(shield)}
     ${card('Auth events', table(['When', 'Event', 'Principal', 'IP'], arr(auth && auth.events).slice(0, 30).map(e => H`<tr><td>${time(e.ts)}</td><td>${e.event}</td><td>${e.principal || ''}</td><td>${e.ip || ''}</td></tr>`), 'No events.'), 'c12')}</div>`);
   ['deny_command_patterns', 'require_approval_patterns'].forEach(id => { const t = $('#' + id); t.dataset.input = 'regex'; I.regex(t); });
 };
+/* Endpoint protection (Shield): analytics, current blocks and the last recorded events. */
+function shieldCard(sh) {
+  if (!sh || !sh.summary) return card('Endpoint protection', H`<p class="muted">Shield is not mounted in this runtime. Floods, brute force and scanner probes are only limited by the OAuth rate limiter.</p>`, 'c12');
+  const s = sh.summary, kinds = s.events_24h || {}, blocked = arr(s.blocked_now), prefixes = arr(s.rate_limited_prefixes);
+  const KIND = { flood: 'warn', brute_force: 'bad', scanner: 'warn', exploit: 'bad', rotating_ip: 'warn', blocked: 'bad' };
+  const stat = (label, n, tone) => H`<div class="shield-stat"><b class="${tone || ''}">${n}</b><small>${label}</small></div>`;
+  return card('Endpoint protection', H`<p class="section-desc">${s.enabled ? 'Shield is active. It throttles floods, blocks brute force and scanner sources for a while, and records every decision with the visitor country when a trusted proxy supplies it. It mitigates abuse; it does not guarantee protection.' : 'Shield is disabled in the configuration.'}</p>
+    <div class="shield-stats" data-testid="shield-stats">${stat('throttled · 24h', s.throttled_24h || 0)}${stat('blocked now', blocked.length, blocked.length ? 'bad' : '')}${Object.keys(kinds).sort().map(k => stat(k.replace('_', ' ') + ' · 24h', kinds[k]))}${stat('last event', s.last_event_at ? rel(s.last_event_at) : 'none')}</div>
+    ${blocked.length ? H`<h3>Blocked addresses</h3>${table(['Address', 'Until', 'Reason', ['', 'act']], blocked.map(b => H`<tr><td><code>${b.ip}</code></td><td>${time(b.until)}</td><td>${b.reason || b.kind || ''}</td><td class="act"><button class="sm" data-act="shield-unblock" data-ip="${b.ip}">Unblock</button></td></tr>`))}` : ''}
+    ${prefixes.length ? H`<p class="small muted">Tightened budget for rotating-address prefixes: ${prefixes.map(p => H`<code>${p.prefix || p}</code> `)}</p>` : ''}
+    <h3>Recent events</h3>${table(['When', 'Kind', 'Action', 'Address', 'Country', 'Path'], arr(sh.events).slice(0, 40).map(e => H`<tr><td>${time(e.ts)}</td><td>${badge(e.kind, KIND[e.kind] || 'info')}</td><td>${e.action}</td><td><code>${e.ip}</code></td><td>${e.country || '—'}</td><td><code class="small">${String(e.method || '')} ${String(e.path || '').slice(0, 60)}</code></td></tr>`), 'No protection events recorded yet.')}`, { cls: 'c12', actions: H`<a class="btn sm ghost" href="#/topology">Topology marker</a>` });
+}
+A['shield-unblock'] = async t => { await post('/api/admin/shield/unblock', { ip: t.dataset.ip }); done(`Unblocked ${t.dataset.ip}`); };
 I.regex = t => {
   const out = $(`[data-regex-out="${t.id}"]`); if (!out) return;
   const bad = lines(t.value).filter(p => { try { new RegExp(p.replace(/\(\?[aiLmsux]+\)/g, '')); return false; } catch { return true; } });

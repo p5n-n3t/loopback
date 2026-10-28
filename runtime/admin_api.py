@@ -164,6 +164,7 @@ def routes(ctx: AppContext) -> list[Route]:
             "recent": ctx.audit.recent(60),
             "alerts": alerts,
             "update": update,
+            "shield": ctx.shield.summary() if getattr(ctx, "shield", None) else None,
         })
 
     async def identity_view(request: Request) -> Response:

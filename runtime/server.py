@@ -1152,6 +1152,13 @@ _routes += admin_api.routes(CTX)
 _routes += _optional_routes("fabric_api")
 _routes += _optional_routes("maintenance_api")
 _routes += _optional_routes("dashboard")
+_routes += _optional_routes("shield")
 _routes += [Route("/healthz", healthz, methods=["GET"]), Mount("/", app=mcp_chain)]
 
 app = AdminGate(Starlette(routes=_routes, lifespan=lifespan))
+try:
+    import shield as _shield_mod
+
+    app = _shield_mod.Shield(app, CTX)  # sets CTX.shield; outermost so it sees every request
+except Exception as exc:  # pragma: no cover - endpoint protection is optional and must never block startup
+    AUDIT.record("startup", "module_error", target="shield", detail={"error": str(exc)[:300]})

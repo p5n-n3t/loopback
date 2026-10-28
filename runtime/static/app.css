@@ -300,3 +300,10 @@ input.invalid,textarea.invalid{border-color:var(--bad)}
 .group-row td{display:table-cell}
 .group-row .group-actions{float:right;display:inline-flex;gap:4px}
 .group-row .group-actions button{text-transform:none;letter-spacing:0;font-weight:500;padding:2px 7px}
+
+/* Shield (endpoint protection) */
+.shield-stats{display:flex;flex-wrap:wrap;gap:10px 22px;margin:8px 0 14px}
+.shield-stat b{display:block;font-size:20px;font-weight:700;letter-spacing:-.02em}
+.shield-stat b.bad{color:var(--bad)}
+.shield-stat small{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.tn .shield-mark.alert .tag{fill:var(--bad)}.tn .shield-mark.off .tag{fill:var(--off)}.tn .shield-mark.ok .tag{fill:var(--ok)}
