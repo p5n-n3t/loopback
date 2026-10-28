@@ -49,3 +49,9 @@ Use `git log -1` for the final delivery revision and `git status --short` for un
 Remaining work: supported old-source recovery, OAuth compatibility, policy persistence, bulk controls, provider discovery, host telemetry, and all remaining original requirements.
 No live configuration changes occur in this investigation. Worker source rollout remains unverified.
 Recommended next task/model: bounded export availability with Luna, then OAuth and policy engineering with Sol. Fable can coordinate if available.
+
+## Login branding follow-up
+
+The owner also reports that the login screen is off brand. The handoff, acceptance map, and continuation prompt now include it explicitly.
+This is a documentation follow-up. It does not change or verify the actual login UI.
+The refreshed document expectation sheet replaces its existing label. Earlier image URLs above remain historical delivery records.

@@ -19,7 +19,9 @@ I intend to connect ChatGPT Plus as additional capacity. Verify actual supported
 
 Preserve all 13 requirements in OWNER-REQUIREMENTS.md. Immediate priorities are the lost-source recovery, actual ChatGPT/Claude OAuth registration failures, the confirmed policy persistence bug, bulk tool controls, complete read-only fleet discovery, accurate host metrics, and current Figma branding. Complete the remaining credentials/API-key/consent, provider/installer, endpoint protection, CLI, and capabilities work too.
 
-Current Figma file: r7Rdu2N3ttXa1K30PDfcnQ. FIGMA.json contains fetched tokens, nodes, and hosted symbol/wordmark/reference exports. Reuse them before refetching. Adapt navigation, buttons, typography, and spacing. Apply restrained logo gradients. Preserve dashboard functionality and accessible states.
+Current Figma file: r7Rdu2N3ttXa1K30PDfcnQ. FIGMA.json contains fetched tokens, nodes, and hosted symbol/wordmark/reference exports. Reuse them before refetching. Adapt navigation, buttons, typography, and spacing. Apply restrained logo gradients. Include the login screen, which I also report as off brand.
+Use the same symbol, wordmark, typography, and button treatment there. Verify error states, keyboard focus, mobile layout, and supported themes.
+Preserve authentication behavior, dashboard functionality, and accessible states.
 
 Discover existing Cloudflare tunnels, Tailscale Serve/Funnel handlers, and MCP gateways locally and on ora1/ora3/ora5/ora6/ora7/aws1/aws2. Show ownership and unknown/partial states. Never contact or deploy ora2/ora4. Preserve RotoXY hostname and routes, including /mcp. The current desktop Funnel 443 proxies / to 127.0.0.1:2030. Do not overwrite it. Preserve Landlock and authorized access boundaries.
 

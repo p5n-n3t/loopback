@@ -26,6 +26,9 @@ The authoritative original text remains in the task when account permissions all
 
 1. Replace both sidebar symbol and wordmark from the current Figma file. Use matching navigation icons and restrained gradients across the dashboard.
 2. Adapt the reference button shapes, navigation, typography, layout, and spacing to the dashboard architecture. Preserve functionality.
+   The owner also reports that the login screen is off brand. Include it in the redesign.
+   Use the current Figma symbol, wordmark, typography, button treatment, and restrained gradients on the login screen.
+   Preserve authentication behavior. Verify error states, keyboard focus, mobile layout, and supported themes.
 3. Add **Select all** and **Deselect all** to MCP tools. Define whether bulk action applies globally, by category, or to a filtered set.
 4. Fix existing checkbox policy persistence first. Sequential changes can discard previous denials. See `AUTH-INVESTIGATION.md`.
 5. Discover unmanaged and managed tunnels/gateways locally and remotely. Topology currently shows only the registered `ora1-system` service.
