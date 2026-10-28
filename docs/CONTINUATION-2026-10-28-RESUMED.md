@@ -1,5 +1,26 @@
 # Resumed engineering checkpoint — 28 October 2026
 
+## Current rollout — 15:57 UTC
+
+The owner deploys source `41a7c0f` on the desktop through the supported local updater.
+The updater creates a backup. The owner's doctor reports no errors.
+Runtime diagnostics confirm Python 3.13.14 and active Landlock.
+Local and public OAuth metadata advertise `none`, `client_secret_basic`, and `client_secret_post`.
+Public health and metadata return 200 with a descriptive Loopback user-agent.
+Python's default user-agent receives Cloudflare error 1010. The paired test changes only that header.
+No Cloudflare configuration changes occur. Real browser-client acceptance remains separate.
+
+The owner installs ora8's worker through Fleet after dashboard recovery.
+All 12 installed worker file hashes match source `41a7c0f`. Worker setup reports success.
+Two real samples produce CPU, memory, and network measurements. Read-only discovery completes successfully.
+The sampled host has 4 CPUs, 7.44% memory use, and 0.25% CPU use during the measured interval.
+Discovery observes 19 listeners, no Tailscale handlers, no cloudflared processes, and no configured bindings for this account.
+Zero managed processes is expected before a binding starts. These observations do not establish a public MCP service.
+
+[Sanitized rollout evidence](proof/ROLLOUT-2026-10-28.json) preserves source hashes and real measurements.
+Other workers remain unverified for this rollout. Actual ChatGPT/Claude consent and live ngrok acceptance remain open.
+Earlier undeployed-desktop and ora8-blocker statements below are historical. This section supersedes them.
+
 ## Latest acceptance result — 10:56 UTC
 
 The owner authorizes a continuation PR from the existing branch.

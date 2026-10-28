@@ -86,8 +86,8 @@
   "open_acceptance": [
     "Actual ChatGPT and Claude registration, consent, refresh and reconnect",
     "Live ngrok account and end-to-end public transport",
-    "Owner desktop/worker deployment and actual terminal rendering",
-    "Permanent ora8 worker registration and production rollout"
+    "Rollout verification for production workers other than ora8",
+    "A real ora8 MCP binding and public transport, if requested"
   ],
   "live_followup": {
     "source_commit": "9c19148262ada84be1f5d1345afbf8bb43ef9f43",
@@ -122,5 +122,18 @@
       "python": "3.11.6"
     },
     "renderer_note": "This fresh sandbox lacks flow-diff-render and Chromium. Matplotlib renders the updated source-flow diagram and expectation sheet. The embedded terminal transcript is real; its visual framing is illustrative."
+  },
+  "rollout": {
+    "source_commit": "41a7c0fa2b46ed4925e8146390e5b0290192c322",
+    "result": "docs/proof/ROLLOUT-2026-10-28.json",
+    "desktop": "Owner updater and doctor succeed. Runtime diagnostics, health and OAuth metadata verified.",
+    "ora8": "All 12 source hashes match. Setup, measured telemetry and read-only discovery succeed. No configured bindings.",
+    "cloudflare": "Default Python user-agent receives error 1010; descriptive Loopback user-agent returns 200. No policy changes.",
+    "verification": {
+      "label": "Rollout \u2014 Desktop And Ora8",
+      "url": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-28/Q7lff_0ZSa5udngK1XQac.png",
+      "met": 6,
+      "unverified": 2
+    }
   }
 }
