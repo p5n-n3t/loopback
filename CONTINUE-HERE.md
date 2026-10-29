@@ -1,5 +1,15 @@
 # Continue Loopback here
 
+## Reconnect investigation — 29 October 2026
+
+PR 10 is merged. This branch continues from main `38c280b`.
+Claude reports seven passing test groups. ChatGPT reconnect remains unresolved.
+The candidate corrects invalid-token challenges and validates refresh scope before rotation.
+All 234 tests pass. Both fixture client catalogs contain the same 40 tools.
+Read [the investigation](docs/reports/RECONNECT-INVESTIGATION-2026-10-29.md) and [protocol evidence](docs/proof/RECONNECT-2026-10-29.json).
+The candidate needs the supported desktop updater, then a ChatGPT metadata refresh and a fresh conversation.
+The older rollout sections below retain their historical scope.
+
 ## Current rollout — 28 October 2026
 
 PR [10](https://github.com/p5n-n3t/loopback/pull/10) is open on `ls/16-review-handoff-and-update-dashboard-desi-1o9R`.

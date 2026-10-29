@@ -504,22 +504,20 @@ def routes(ctx: AppContext) -> list[Route]:
             refresh = str(form.get("refresh_token") or "")
             if not refresh:
                 return oauth_error("invalid_request", "refresh_token is required")
-            try:
-                new_refresh, scopes, family = ctx.auth.rotate_refresh_token(refresh, client_id=client_id, resource=resource)
-            except AuthError as exc:
-                ctx.auth.limiter.failure("token", ip, threshold=30)
-                return oauth_error(exc.error, exc.description)
             requested = str(form.get("scope") or "")
+            try:
+                new_refresh, scopes, family = ctx.auth.rotate_refresh_token(refresh, client_id=client_id, resource=resource,
+                                                                          requested_scope=requested)
+            except AuthError as exc:
+                if exc.error != "invalid_scope":
+                    ctx.auth.limiter.failure("token", ip, threshold=30)
+                ctx.auth.record_event("oauth_refresh_failed", client_id, ip, {"error": exc.error})
+                return oauth_error(exc.error, exc.description)
             if requested:
-                try:
-                    narrowed = normalize_scopes(requested)
-                except AuthError as exc:
-                    return oauth_error("invalid_scope", exc.description)
-                if not narrowed <= scopes:
-                    return oauth_error("invalid_scope", "refresh cannot widen the granted scope")
-                scopes = narrowed
+                scopes = normalize_scopes(requested)
             access, claims = ctx.auth.issue_access_token(client_id=client_id, resource=resource, scopes=scopes, family_id=family)
             ctx.auth.touch_client(client_id)
+            ctx.auth.record_event("oauth_tokens_issued", client_id, ip, {"grant": "refresh_token"})
             return JSONResponse({"access_token": access, "token_type": "Bearer", "expires_in": ctx.auth.access_ttl,
                                  "refresh_token": new_refresh, "scope": claims["scope"]}, headers=NO_STORE)
 

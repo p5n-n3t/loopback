@@ -940,8 +940,12 @@ class TokenGate:
                                       legacy_machine_token=CTX.legacy_mcp_token_enabled())
         if principal is None:
             request = Request(scope)
-            AUDIT.record("mcp.auth", "unauthorized", detail={"user_agent": h.get("user-agent", "")[:200]})
-            response = auth_http.unauthorized(CTX, request, description="a valid OAuth access token or Loopback API token is required")
+            supplied = bool(h.get("authorization") or h.get("x-api-key") or h.get("api-key"))
+            error = "invalid_token" if supplied else None
+            AUDIT.record("mcp.auth", "unauthorized", detail={"user_agent": h.get("user-agent", "")[:200],
+                                                          "credential_supplied": supplied, "error": error})
+            response = auth_http.unauthorized(CTX, request, error=error,
+                                              description="a valid OAuth access token or Loopback API token is required")
             return await response(scope, receive, send)
         scope.setdefault("state", {})["principal"] = principal
         token = CURRENT_PRINCIPAL.set(principal)

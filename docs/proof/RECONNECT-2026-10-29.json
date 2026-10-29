@@ -1,0 +1,97 @@
+{
+  "base": "38c280b",
+  "candidate": "working tree",
+  "tests": {
+    "suite": 234,
+    "result": "pass",
+    "new_contract_tests": 4,
+    "ruff": "pass",
+    "compile": "pass",
+    "bandit_high_severity": "pass"
+  },
+  "candidate_http": {
+    "invalid_scope_http": 400,
+    "corrected_refresh_retry_http": 200,
+    "invalid_token_http": 401,
+    "invalid_token_challenge": true,
+    "missing_token_discovery_challenge": true,
+    "catalog_equal": true,
+    "catalog_counts": {
+      "ChatGPT": 40,
+      "Claude": 40
+    },
+    "stale_session_header_http": 200
+  },
+  "catalog_names": [
+    "browser_status",
+    "connections",
+    "desktop_status",
+    "diagnostics",
+    "docx_replace_text",
+    "docx_text",
+    "execute",
+    "git_info",
+    "job_list",
+    "job_output",
+    "job_start",
+    "job_stop",
+    "list_dir",
+    "machine_info",
+    "node_call",
+    "node_diagnostics",
+    "node_execute",
+    "node_list",
+    "node_read_file",
+    "patch_file",
+    "pdf_extract_pages",
+    "pdf_merge",
+    "pdf_text",
+    "permissions",
+    "policy_status",
+    "process_kill",
+    "process_list",
+    "read_file",
+    "search_text",
+    "ssh_execute",
+    "ssh_target_list",
+    "tail_file",
+    "terminal_close",
+    "terminal_read",
+    "terminal_resize",
+    "terminal_start",
+    "terminal_write",
+    "write_file",
+    "xlsx_read_range",
+    "xlsx_write_range"
+  ],
+  "public_before_deployment": {
+    "/healthz": 200,
+    "/.well-known/oauth-protected-resource": 200,
+    "/.well-known/oauth-protected-resource/mcp": 200,
+    "/.well-known/oauth-authorization-server": 200,
+    "invalid_credential_http": 401,
+    "invalid_token_in_challenge": false
+  },
+  "owner_report": {
+    "source": "docs/reports/CONNECTOR-TEST-2026-10-29.md",
+    "claude": "Owner-supplied Claude report: all seven test groups pass, with a transient auth error and a second SSH attempt. Not independently replayed.",
+    "chatgpt": "Repeated reconnect failure remains unresolved."
+  },
+  "shared_chatgpt_response": {
+    "url": "https://chatgpt.com/s/t_6ae313e7112881918e098e7a575b9d88",
+    "error": "Browser access requires the originating browser context.",
+    "scope": "Shared assistant response, not the failed Loopback tool request or a raw OAuth trace."
+  },
+  "limits": [
+    "Fixture clients use ChatGPT and Claude names. They are not actual provider sessions.",
+    "No failing ChatGPT tool request, token or private gateway log is captured.",
+    "Public discovery succeeds. It does not prove provider-origin Cloudflare requests always succeed.",
+    "Owner desktop must deploy the candidate. No auth policy or credentials are weakened."
+  ],
+  "source_hashes": {
+    "runtime/auth.py": "fe9bbc23e7c38b69d2024d4c65a80e4c6bca5ebce5284d0972c43a6596bbe4fd",
+    "runtime/auth_http.py": "0d566ceb543810a25828b1c15690abe47a0d0849eec66137e9e370041b616cc6",
+    "runtime/server.py": "cea4afec3ec7ced9e46bc60dafac7d6dbfcf612a005d0bf0576133bf01c2d5ee",
+    "tests/test_reconnect_contract.py": "a0b4c356ca6f99b87968c6c761ee4f94d0e0adda5e9eb517757961d47b15f258"
+  }
+}

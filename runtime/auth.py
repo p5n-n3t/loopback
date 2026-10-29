@@ -710,7 +710,8 @@ class AuthStore:
                        (sha256_hex(token), family, client_id, scope_string(scopes), resource, time.time(), time.time() + self.refresh_ttl))
         return token, family
 
-    def rotate_refresh_token(self, token: str, *, client_id: str, resource: str) -> tuple[str, set[str], str]:
+    def rotate_refresh_token(self, token: str, *, client_id: str, resource: str,
+                             requested_scope: str | None = None) -> tuple[str, set[str], str]:
         """Validate + rotate. Reuse of a rotated token revokes the whole family."""
         h = sha256_hex(token)
         with self._lock, self._connect() as db:
@@ -730,8 +731,10 @@ class AuthStore:
                 raise AuthError("invalid_grant", "refresh token belongs to a different client")
             if row["resource"] != resource:
                 raise AuthError("invalid_target", "refresh token was issued for a different resource")
+            scopes = normalize_scopes(row["scope"])
+            if requested_scope and not normalize_scopes(requested_scope) <= scopes:
+                raise AuthError("invalid_scope", "refresh cannot widen the granted scope")
             db.execute("UPDATE refresh_tokens SET rotated_at=? WHERE token_hash=?", (time.time(), h))
-        scopes = normalize_scopes(row["scope"])
         new_token, family = self.issue_refresh_token(client_id=client_id, resource=resource, scopes=scopes, family_id=row["family_id"])
         return new_token, scopes, family
 
