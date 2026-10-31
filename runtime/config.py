@@ -98,6 +98,9 @@ def default_config() -> dict[str, Any]:
             "disk_warn_percent": 90,
             "job_log_max_bytes": 64 * 1024 * 1024,
             "max_completed_jobs": 200,
+            "max_running_jobs_per_principal": 16,
+            "max_terminals_per_principal": 8,
+            "terminal_idle_seconds": 4 * 3600,
         },
     }
 
@@ -243,7 +246,8 @@ def validate(cfg: dict[str, Any]) -> list[str]:
         errors.append("maintenance.update_channel must be stable, prerelease or off")
     for key in ("update_check_interval_hours", "backup_retention", "log_max_bytes", "log_backups",
                 "probe_interval_seconds", "history_retention_days", "audit_retention_days", "disk_warn_percent",
-                "job_log_max_bytes", "max_completed_jobs"):
+                "job_log_max_bytes", "max_completed_jobs", "max_running_jobs_per_principal",
+                "max_terminals_per_principal", "terminal_idle_seconds"):
         value = mt.get(key)
         if not isinstance(value, int) or value < 0:
             errors.append(f"maintenance.{key} must be a non-negative integer")

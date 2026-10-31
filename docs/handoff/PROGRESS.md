@@ -13,7 +13,7 @@ Resume here if a session ends. Update this file at every commit.
 | Step | Ledger rows | State |
 | --- | --- | --- |
 | Checkpoint file and plan | — | done |
-| Principal-scoped jobs and terminals, log quotas | H02, H03, H22 | pending |
+| Principal-scoped jobs and terminals, log quotas | H02, H03, H22 | done (tests/test_ownership.py) |
 | Parsed browser URL policy | H04 | pending |
 | Per-operation desktop readiness | H08 | pending |
 | Staged discovery contracts, providers, fixtures, API | H18, H19 | pending |

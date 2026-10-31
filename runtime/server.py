@@ -48,8 +48,9 @@ from bootstrap import build_context
 from browser import BrowserAdapter
 from desktop import DesktopAdapter
 from documents import DocumentTools
-from jobs import shell_argv
+from jobs import QuotaExceeded, shell_argv
 from policy import ApprovalRequired, PolicyError
+from redaction import redact_text
 from version import VERSION
 
 CTX = build_context()
@@ -101,6 +102,23 @@ def _principal_name() -> str | None:
     return p.display if p else None
 
 
+def _owner_key() -> str:
+    """Stable ownership key for jobs and terminals: never the display name.
+
+    OAuth grants are separated per client as well as per subject, so one connector
+    cannot read or drive another connector's sessions. Local stdio use (no HTTP
+    principal) shares one ``local`` owner. Administrators inspect all resources
+    through the dashboard API, which uses the unscoped manager view.
+    """
+    p = CURRENT_PRINCIPAL.get()
+    if p is None:
+        return "local"
+    key = f"{p.kind}:{p.subject}"
+    if p.client_id:
+        key += f"#{p.client_id}"
+    return key
+
+
 def _secure_cwd(value: str | None, target: str = "local") -> str:
     p = POLICY.check_path(value or CTX.config.effective_initial_cwd(), write=False, target=target)
     if target == "local" and not p.is_dir():
@@ -123,8 +141,11 @@ def sandbox_wrap(argv: list[str], cwd: str):
 if JOBS is not None:
     JOBS.wrap = sandbox_wrap
     JOBS.max_completed = int(CTX.config.data["maintenance"].get("max_completed_jobs", 200))
+    JOBS.max_running_per_owner = int(CTX.config.data["maintenance"].get("max_running_jobs_per_principal", 16))
 if TERMINALS is not None:
     TERMINALS.wrap = sandbox_wrap
+    TERMINALS.max_per_owner = int(CTX.config.data["maintenance"].get("max_terminals_per_principal", 8))
+    TERMINALS.idle_timeout = float(CTX.config.data["maintenance"].get("terminal_idle_seconds", 4 * 3600))
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +165,8 @@ def _translate(exc: BaseException) -> ToolError:
     """
     if isinstance(exc, ApprovalRequired):
         return ToolError(str(exc))
+    if isinstance(exc, QuotaExceeded):
+        return ToolError(f"quota_exceeded: {exc}")
     if isinstance(exc, PolicyError):
         return ToolError(f"policy_denied: {exc}")
     if isinstance(exc, KeyError):
@@ -461,21 +484,25 @@ def execute(command: str, cwd: str | None = None, timeout: int | None = None, ap
 def job_start(command: str, cwd: str | None = None, approval_id: str | None = None) -> dict[str, Any]:
     """Start a long-running local command in its own process group and return a job id; read output with job_output."""
     POLICY.check_command(command, approval_id=approval_id)
-    return JOBS.start(command, _secure_cwd(cwd), principal=_principal_name())
+    return JOBS.start(command, _secure_cwd(cwd), principal=_principal_name(), owner=_owner_key())
 
 
 @mcp.tool(title="List background jobs", annotations=READ)
 @meta("loopback:read", "execution")
 def job_list() -> list[dict[str, Any]]:
-    """List background jobs started by Loopback (running and recently finished), with their target machine."""
-    return JOBS.list()
+    """List your background jobs (running and recently finished), with their target machine."""
+    return JOBS.list(owner=_owner_key())
 
 
 @mcp.tool(title="Read job output", annotations=READ_NONIDEMPOTENT)
 @meta("loopback:read", "execution")
 def job_output(job_id: str, offset: int = 0, max_bytes: int = 131072) -> dict[str, Any]:
     """Read incremental output from a background job; pass next_offset back to fetch only new bytes."""
-    return JOBS.output(job_id, offset, max_bytes)
+    result = JOBS.output(job_id, offset, max_bytes, owner=_owner_key())
+    result["content"], hidden = redact_text(result.get("content", ""))
+    if hidden:
+        result["redacted_values"] = hidden
+    return result
 
 
 @mcp.tool(title="Stop background job", annotations=MUTATE_IDEMPOTENT)
@@ -486,7 +513,7 @@ def job_stop(job_id: str, signal_name: str = "TERM") -> dict[str, Any]:
     sig = getattr(signal, "SIG" + signal_name.upper(), None)
     if not isinstance(sig, signal.Signals):
         raise ValueError("unsupported signal")
-    return JOBS.stop(job_id, int(sig))
+    return JOBS.stop(job_id, int(sig), owner=_owner_key())
 
 
 @mcp.tool(title="Start persistent terminal", annotations=CREATE)
@@ -496,7 +523,7 @@ def terminal_start(cwd: str | None = None, rows: int = 30, cols: int = 120) -> d
     ok, reason = POLICY.shell_enabled("local")
     if not ok:
         raise PolicyError(reason or "terminal access is disabled by policy")
-    return TERMINALS.start(_secure_cwd(cwd), rows=rows, cols=cols, principal=_principal_name())
+    return TERMINALS.start(_secure_cwd(cwd), rows=rows, cols=cols, principal=_principal_name(), owner=_owner_key())
 
 
 @mcp.tool(title="Write terminal input", annotations=MUTATE)
@@ -505,21 +532,21 @@ def terminal_write(terminal_id: str, data: str, approval_id: str | None = None) 
     """Send keystrokes/text to a persistent terminal. Text input is checked against the command policy."""
     if data.strip():
         POLICY.check_command(data, approval_id=approval_id)
-    return TERMINALS.write(terminal_id, data)
+    return TERMINALS.write(terminal_id, data, owner=_owner_key())
 
 
 @mcp.tool(title="Read terminal output", annotations=READ_NONIDEMPOTENT)
 @meta("loopback:read", "execution")
 def terminal_read(terminal_id: str, max_bytes: int = 131072, clear: bool = True) -> dict[str, Any]:
     """Read buffered output from a persistent terminal."""
-    return TERMINALS.read(terminal_id, max_bytes=max_bytes, clear=clear)
+    return TERMINALS.read(terminal_id, max_bytes=max_bytes, clear=clear, owner=_owner_key())
 
 
 @mcp.tool(title="Resize terminal", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 @meta("loopback:exec", "execution")
 def terminal_resize(terminal_id: str, rows: int = 30, cols: int = 120) -> dict[str, Any]:
     """Resize a persistent terminal PTY."""
-    return TERMINALS.resize(terminal_id, rows, cols)
+    return TERMINALS.resize(terminal_id, rows, cols, owner=_owner_key())
 
 
 @mcp.tool(title="Close terminal", annotations=MUTATE_IDEMPOTENT)
@@ -527,7 +554,7 @@ def terminal_resize(terminal_id: str, rows: int = 30, cols: int = 120) -> dict[s
 def terminal_close(terminal_id: str) -> dict[str, Any]:
     """Close a persistent terminal session and its shell."""
     POLICY.check_process_control()
-    return TERMINALS.close(terminal_id)
+    return TERMINALS.close(terminal_id, owner=_owner_key())
 
 
 @mcp.tool(title="List processes", annotations=READ)
