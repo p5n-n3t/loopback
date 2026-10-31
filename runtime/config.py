@@ -71,6 +71,19 @@ def default_config() -> dict[str, Any]:
         },
         "discovery": {  # read-only inventory of existing routes; listed targets are never contacted
             "excluded_targets": [],
+            "probe_concurrency": 4,
+            "enroll_concurrency": 2,
+            "command_timeout": 8,
+            "scan_timeout": 120,
+        },
+        "mesh_setup": {  # opt-in Cloudflare Mesh (Cloudflare One Client); the token is never stored here
+            "enabled": False,
+            "role": "node",
+            "organization": None,
+            "mesh_range": "100.96.0.0/12",
+            "acknowledge_tailscale_overlap": False,
+            "overlap_mitigation": None,
+            "verify_tcp": None,
         },
         "shield": {  # unobtrusive endpoint protection (see runtime/shield.py for the full key set)
             "enabled": True,

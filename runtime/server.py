@@ -1212,6 +1212,7 @@ _routes += _optional_routes("maintenance_api")
 _routes += _optional_routes("dashboard")
 _routes += _optional_routes("shield")
 _routes += _optional_routes("discovery")
+_routes += _optional_routes("scan_api")
 _routes += [Route("/healthz", healthz, methods=["GET"]), Mount("/", app=mcp_chain)]
 
 app = AdminGate(Starlette(routes=_routes, lifespan=lifespan))

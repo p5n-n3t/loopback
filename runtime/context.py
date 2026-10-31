@@ -41,6 +41,7 @@ class AppContext:
     desktop: Any = None
     documents: Any = None
     discovery: Any = None
+    scanner: Any = None
     shield: Any = None
     tool_enabled: Callable[[str], bool] | None = None
     tool_catalog: Callable[[], list[dict[str, Any]]] | None = None
