@@ -293,7 +293,18 @@ class PolicyStore:
     def target_policy(self, target: str = "local") -> dict[str, Any]:
         """Effective policy for one target. Remote targets never inherit local roots."""
         if target in {"local", "", None}:
-            return dict(self.data)
+            data = dict(self.data)
+            # Loopback's own state (tokens, approvals, job logs) is never reachable through file or
+            # shell tools, even when an owner's custom policy drops the default denied roots (H03).
+            denied = list(data.get("denied_roots") or [])
+            cfg = self.config_dir.resolve()
+            # A config directory that contains the home directory (test and container layouts) cannot be
+            # denied wholesale; its job logs still are.
+            own = str(cfg / "jobs") if self._within(Path(self.home).resolve(), cfg) else str(cfg)
+            if own not in denied and not any(self._expand(d) == Path(own) for d in denied if isinstance(d, str)):
+                denied.append(own)
+            data["denied_roots"] = denied
+            return data
         tp = dict((self.data.get("targets") or {}).get(target) or {})
         base = {
             "profile": canonical_profile(tp.get("profile") or self.profile),

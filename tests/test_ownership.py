@@ -135,6 +135,23 @@ class TerminalOwnershipTests(unittest.TestCase):
         self.assertFalse(self.terms.info(first["id"])["alive"])
 
 
+class StateProtectionTests(unittest.TestCase):
+    def test_config_dir_is_denied_even_when_policy_drops_defaults(self):
+        from policy import PolicyError, PolicyStore
+
+        home = Path(tempfile.mkdtemp(prefix="lb-home-"))
+        cfg = home / ".config" / "loopback-custom"
+        cfg.mkdir(parents=True)
+        (cfg / "jobs").mkdir()
+        policy = PolicyStore(cfg, home=str(home))
+        policy.save({"profile": "standard", "allowed_roots": [str(home)], "denied_roots": []})
+        self.assertEqual(policy.check_path(home), home.resolve())
+        for path in (cfg / "approvals.json", cfg / "jobs" / "abc.log"):
+            with self.assertRaises(PolicyError):
+                policy.check_path(path)
+        self.assertIn(str(cfg.resolve()), policy.target_policy("local")["denied_roots"])
+
+
 class RedactionTests(unittest.TestCase):
     def test_known_token_shapes_are_hidden_and_counted(self):
         text = ("Authorization: Bearer abcdefghijklmnopqrstuvwxyz\n"
