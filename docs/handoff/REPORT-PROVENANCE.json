@@ -1,0 +1,19 @@
+{
+  "downloaded_on": "2026-10-31",
+  "reports": [
+    {
+      "path": "docs/reports/CLAUDE-CAPABILITY-2026-10-31.md",
+      "source": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/files/2026-10-31/T-kep_HBo83OVn9IM9jAr/claude2.md",
+      "bytes": 21369,
+      "sha256": "c64e02e03d5884af1bc2966fcbce3d252cefd0de61c085674de10cd10ee2a18d",
+      "handling": "Downloaded unchanged with curl; owner-supplied observations, not a new retest."
+    },
+    {
+      "path": "docs/reports/CHATGPT-CAPABILITY-2026-10-31.md",
+      "source": "https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/files/2026-10-31/TVFI1vwTETCVyvUAwLnN5/chatgpt2.md",
+      "bytes": 52773,
+      "sha256": "336555da87c884c04f6071d969de61fe8dbd9b15c9042efd70a1cea127954794",
+      "handling": "Downloaded unchanged with curl; owner-supplied observations, not a new retest."
+    }
+  ]
+}
