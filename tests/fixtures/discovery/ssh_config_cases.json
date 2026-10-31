@@ -1,0 +1,7 @@
+{
+  "home": "/home/tester",
+  "files": {
+    "/home/tester/.ssh/config": "# sanitized fixture\nInclude config.d/extra\n\nHost *\n    ServerAliveInterval 30\n    User wildcarduser\n\nHost bastion-*\n    User jump\n\nHost !secret web1 web2\n    HostName web.example.net\n\nHost lab1\n    HostName 192.0.2.10\n    Port 6722\n    User alice\n    IdentityFile ~/.ssh/id_example\n\nHost v6box\n    HostName 2001:db8::5\n\nHost viajump\n    HostName 192.0.2.20\n    ProxyJump bastion.example.net\n\nHost cmdhost\n    HostName 192.0.2.30\n    ProxyCommand ssh -W %h:%p bastion.example.net\n\nMatch host foo*\n    User evil\n    HostName 192.0.2.250\n\nHost aftermatch\n    HostName 192.0.2.40\n",
+    "/home/tester/.ssh/config.d/extra": "Host included1\n    HostName 192.0.2.60\n    Port 2222\n"
+  }
+}

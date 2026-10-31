@@ -364,13 +364,9 @@ function sandboxHtml(sb) {
     ${kv([['Backend', H`<code>${sb.backend}</code>`], ['Requested', sb.requested], ['Available', yes(sb.available)], ['Active', okb(sb.active, 'active', 'inactive')], ['ABI', sb.abi], ['Denied sub-paths enforced', yn(sb.enforces_denied_subpaths)], ['Require enforcement', yn(sb.require_enforcement)], ['Unenforced acknowledged', yn(sb.acknowledge_unenforced)]])}
     ${arr(sb.caveats).length ? H`<p class="small muted">Caveats:</p><ul class="small">${sb.caveats.map(c => H`<li>${c}</li>`)}</ul>` : ''}`;
 }
-function approvalsTable(list) {
-  return table(['Request', 'Target', 'Requested', 'Expires', ['', 'act']], list.map(a => H`<tr><td>${a.summary}</td><td>${targetBadge(a.target)}</td><td>${time(a.created_at)}</td><td>${time(a.expires_at)}</td>
-    <td class="act"><button class="sm primary" data-act="approve" data-id="${a.id}" data-uses="1">Approve once</button> <button class="sm" data-act="approve" data-id="${a.id}" data-uses="20" data-ttl="3600">Approve 1h</button> <button class="sm danger" data-act="deny" data-id="${a.id}">Deny</button></td></tr>`), 'No pending approvals.');
-}
+/* Pending approvals: the queue renders from approvalsQueueHtml (see the APPROVALS-DISCOVERY block). */
+function approvalsTable(list) { return H`<div id="appr-queue">${approvalsQueueHtml(list, apprState.open)}</div>`; }
 const targetBadge = t => !t || t === 'local' ? badge('local', 'accent') : badge(t, 'info');
-A.approve = async t => { await post(`/api/admin/approvals/${enc(t.dataset.id)}/approve`, { uses: Number(t.dataset.uses || 1), ttl_seconds: t.dataset.ttl ? Number(t.dataset.ttl) : null }); done('Approved'); };
-A.deny = async t => { await post(`/api/admin/approvals/${enc(t.dataset.id)}/deny`); done('Denied'); };
 function auditTable(rows) {
   return table(['When', 'Principal', 'Tool', 'Status', ['ms', 'num'], 'Target'], rows.map(x => {
     const d = x.detail || {};
@@ -603,6 +599,7 @@ views.services = async v => {
     <div class="grid" data-testid="services-view">
       ${card('Services', H`<div id="service-list">${drawRows(fleet)}</div>`, 'c12')}
       ${card('Discovered routes & gateways', H`<div id="discovery-list">${discoveryHtml(discovery)}</div>`, { cls: 'c12', actions: H`<button class="sm" data-act="discovery-refresh">Rescan hosts</button>` })}
+      <div class="c12" id="discovery-extra"></div>
       ${card(edit ? 'Edit ' + edit : 'New service', H`<form data-form="binding" data-testid="binding-form">${errBox}<div class="fields">
         ${fld('Service name', 'f_name', inp('name', b.name, {req:true, ph:'research-tools', extra:edit ? 'readonly' : 'pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,39}"'}))}
         ${fld('Run on', 'f_target', H`<select id="f_target" name="target">${['local', ...S.map(s => s.name)].map(t => opt(t, selectedTarget, t === 'local' ? 'This machine' : t))}</select>`, 'Install the worker from Fleet before starting a remote service.')}
@@ -633,6 +630,325 @@ views.services = async v => {
 };
 C['binding-transport'] = t => { $('#http-fields').hidden = t.value !== 'http'; $('#stdio-fields').hidden = t.value !== 'stdio'; };
 C['binding-exposure'] = t => { $('#cloudflare-fields').hidden = t.value !== 'cloudflare'; };
+/* ==== APPROVALS-DISCOVERY BEGIN
+ * Approvals queue/history, staged host discovery and the Mesh card. Render functions are pure
+ * (data in, HTML out) so tests/dashboard_approvals_discovery.test.cjs can run them in a vm. */
+const has = (c, x) => !!c && (typeof c.has === 'function' ? c.has(x) : Array.isArray(c) && c.includes(x));
+const setHtml = (id, h) => { const el = doc.getElementById(id); if (el) el.innerHTML = String(h); return el; };
+const copyBtn = (label = 'Copy', copy) => H`<button type="button" class="sm" data-act="copy-text"${copy == null ? '' : raw(` data-copy="${esc(copy)}"`)}>${label}</button>`;
+const leftText = s => {
+  if (s == null) return 'no expiry';
+  s = Math.floor(Number(s)); if (!(s > 0)) return 'expired';
+  const m = Math.floor(s / 60);
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : m ? `${m}m ${s % 60}s` : `${s}s`;
+};
+const expiryText = a => a.expires_in_seconds != null && !(a.expires_in_seconds > 0) ? 'Expired' : 'Expires in ' + leftText(a.expires_in_seconds);
+const APPR_KIND = { pending: 'warn', approved: 'ok', consumed: 'info', denied: 'bad', expired: 'off' };
+function approvalRiskHtml(a) {
+  const d = a.detail || {}, root = d.privilege === 'sudo';
+  return H`${badge(root ? 'sudo (root)' : d.privilege === 'caller' ? 'runs as caller' : (d.privilege || 'unknown privilege'), root ? 'bad' : 'info')}${d.matched_rule ? H` <span class="small muted">rule: <code>${d.matched_rule}</code></span>` : ''}`;
+}
+/* Complete, un-truncated view of one approval. Decision buttons only appear while it is pending. */
+function approvalDetailHtml(a) {
+  const d = a.detail || {}, id = a.id, hidden = Number(d.redacted_values) || 0, g = a.grant;
+  return H`<div class="appr-detail" data-id="${id}">
+    <div data-copy-root><div class="row between"><h3>Full command</h3>${copyBtn('Copy command')}</div>
+    <pre class="cmd" tabindex="0" aria-label="Full command">${d.command != null ? d.command : a.summary}</pre></div>
+    ${hidden > 0 ? H`<p class="alert warning small" role="note"><span><b>${hidden} value(s) hidden</b>Secrets are shown as [REDACTED]. The decision still binds the exact original command (fingerprint <code>${a.fingerprint_short}</code>).</span></p>` : ''}
+    ${kv([['Working directory', d.cwd ? H`<code>${d.cwd}</code>` : null], ['Target', H`<code>${d.target || a.target || 'local'}</code>`], ['Requested by', a.principal || 'unknown caller'],
+      ['Matched rule', d.matched_rule ? H`<code>${d.matched_rule}</code>` : 'none'], ['Privilege', d.privilege === 'sudo' ? 'sudo (root)' : d.privilege === 'caller' ? 'runs as the calling user' : d.privilege],
+      ['Expiry', H`${expiryText(a)} <span class="small muted">${a.expires_at ? abs(a.expires_at) : ''}</span>`], ['Fingerprint', H`<code>${a.fingerprint_short}</code>`],
+      ['Size', d.length != null ? `${d.length} chars, ${d.lines ?? '?'} line(s)` : undefined], ['Uses left', a.uses_left],
+      ...(a.status && a.status !== 'pending' ? [['Decision', H`${badge(a.status, APPR_KIND[a.status])} by ${a.decided_by || 'unknown'} ${a.decided_at ? rel(a.decided_at) : ''}`], ['Reason', a.reason || null], ['Grant', g ? `${g.uses} use(s), scope ${g.scope || 'exact action'}${g.expires_at ? ', until ' + abs(g.expires_at) : ''}` : undefined]] : [])])}
+    ${a.status === 'pending' || !a.status ? H`<p class="small muted">Approving binds this exact command, working directory, target and caller. A change to any of them needs a new decision.</p>
+    <div class="appr-msg small" role="alert" aria-live="assertive"></div>
+    <div class="row appr-actions">
+      <button type="button" class="primary" data-act="appr-approve" data-id="${id}" data-fp="${a.fingerprint_short}" data-uses="1">Approve once</button>
+      <button type="button" data-act="appr-approve" data-id="${id}" data-fp="${a.fingerprint_short}" data-uses="20" data-ttl="3600">Approve for 1 hour (20 uses)</button>
+      <button type="button" class="danger" data-act="appr-deny-open" data-id="${id}">Deny…</button>
+      <button type="button" class="ghost" data-act="appr-toggle" data-id="${id}">Close details</button></div>
+    <div class="deny-box" hidden><div class="field"><label for="appr-reason-${id}">Reason (optional)</label><input id="appr-reason-${id}" name="reason" maxlength="300" autocomplete="off" placeholder="Why is this denied?"></div>
+      <div class="row"><button type="button" class="danger solid" data-act="appr-deny" data-id="${id}" data-fp="${a.fingerprint_short}">Confirm deny</button><button type="button" data-act="appr-deny-cancel" data-id="${id}">Cancel</button></div></div>` : H`<div class="row"><button type="button" class="ghost" data-act="appr-toggle" data-id="${id}">Close details</button></div>`}
+  </div>`;
+}
+function approvalsQueueHtml(list, open) {
+  list = arr(list);
+  if (!list.length) return H`<div class="empty">No pending approvals.</div>`;
+  return H`<div class="tw"><table class="stack"><thead><tr><th>Action</th><th>Target</th><th>Requested by</th><th>Risk</th><th>Requested</th><th>Status</th><th><span class="sr">Details</span></th></tr></thead><tbody>${list.map(a => {
+    const o = has(open, a.id);
+    return H`<tr data-id="${a.id}"><td data-label="Action">${badge(a.action || 'command')} <span class="wrap">${a.summary}</span></td><td data-label="Target">${targetBadge(a.target)}</td><td data-label="Requested by">${a.principal || 'unknown caller'}</td>
+      <td data-label="Risk">${approvalRiskHtml(a)}</td><td data-label="Requested">${rel(a.created_at)}<div class="small muted">${expiryText(a)}</div></td><td data-label="Status">${badge(a.status || 'pending', APPR_KIND[a.status || 'pending'])}</td>
+      <td class="act"><button type="button" class="sm" data-act="appr-toggle" data-id="${a.id}" aria-expanded="${o ? 'true' : 'false'}" aria-controls="appr-d-${a.id}">${o ? 'Close details' : 'Review & decide'}</button></td></tr>
+      <tr class="detail-row" id="appr-d-${a.id}" data-detail-for="${a.id}"${o ? '' : raw(' hidden')}><td colspan="7">${o ? approvalDetailHtml(a) : ''}</td></tr>`;
+  })}</tbody></table></div>`;
+}
+const APPR_FILTERS = ['all', 'approved', 'denied', 'expired', 'consumed'];
+function approvalsHistoryTable(rows) {
+  rows = arr(rows);
+  if (!rows.length) return H`<div class="empty">No approvals match this filter.</div>`;
+  return H`<div class="tw"><table class="stack"><thead><tr><th>Status</th><th>Action</th><th>Target</th><th>Requested by</th><th>Decided by</th><th>Reason</th><th>Decided</th></tr></thead><tbody>${rows.map(a => H`<tr data-id="${a.id}">
+    <td data-label="Status">${badge(a.status, APPR_KIND[a.status])}${a.grant ? H`<div class="small muted">${a.grant.uses} use(s)</div>` : ''}</td>
+    <td data-label="Action"><span class="wrap">${a.summary}</span><details class="hist-cmd"><summary>Full command</summary><pre class="cmd">${(a.detail || {}).command != null ? a.detail.command : a.summary}</pre>${Number((a.detail || {}).redacted_values) > 0 ? H`<p class="small muted">${a.detail.redacted_values} value(s) hidden</p>` : ''}<p class="small muted">cwd <code>${(a.detail || {}).cwd || '—'}</code> · fingerprint <code>${a.fingerprint_short}</code></p></details></td>
+    <td data-label="Target">${targetBadge(a.target)}</td><td data-label="Requested by">${a.principal || 'unknown caller'}</td><td data-label="Decided by">${a.decided_by || '—'}</td>
+    <td data-label="Reason"><span class="wrap">${a.reason || '—'}</span></td><td data-label="Decided">${a.decided_at ? rel(a.decided_at) : '—'}</td></tr>`)}</tbody></table></div>`;
+}
+function approvalsHistoryHtml(rows, filter) {
+  return H`<div class="row toolbar"><div class="field inline"><label for="appr-filter">Status</label><select id="appr-filter" data-change="appr-filter">${APPR_FILTERS.map(f => opt(f, filter || 'all', f === 'all' ? 'All decided' : f[0].toUpperCase() + f.slice(1)))}</select></div></div><div id="appr-history-table">${approvalsHistoryTable(rows)}</div>`;
+}
+const apprState = { open: new Set(), filter: 'all' };
+async function loadApprHistory(onlyTable) {
+  const q = apprState.filter === 'all' ? '' : '&status=' + enc(apprState.filter);
+  const rows = await soft('/api/admin/approvals/history?limit=100' + q);
+  if (!doc.getElementById('appr-history')) return;
+  if (rows == null) { setHtml('appr-history', H`<div class="empty">Approval history is unavailable.</div>`); return; }
+  const list = arr(rows, 'approvals', 'history').filter(a => apprState.filter !== 'all' || a.status !== 'pending');
+  if (onlyTable && doc.getElementById('appr-history-table')) setHtml('appr-history-table', approvalsHistoryTable(list));
+  else setHtml('appr-history', approvalsHistoryHtml(list, apprState.filter));
+}
+async function reloadApprovals() {
+  const list = await soft('/api/admin/approvals');
+  if (list == null) return;
+  const l = arr(list, 'approvals'); apprState.open = new Set([...apprState.open].filter(id => l.some(a => a.id === id)));
+  setHtml('appr-queue', approvalsQueueHtml(l, apprState.open));
+  loadApprHistory(true);
+}
+A['appr-reload'] = () => reloadApprovals();
+C['appr-filter'] = t => { apprState.filter = t.value; return loadApprHistory(true); };
+A['appr-toggle'] = async t => {
+  const id = t.dataset.id, row = $(`tr[data-id="${CSS.escape(id)}"]`, doc), det = doc.getElementById('appr-d-' + id); if (!det) return;
+  const trig = $('[data-act="appr-toggle"][aria-expanded]', row), open = det.hidden;
+  if (open) {
+    const list = await soft('/api/admin/approvals'); const a = arr(list, 'approvals').find(x => x.id === id);
+    if (!a) { toast('That approval is no longer pending.', 'error'); return reloadApprovals(); }
+    apprState.open.add(id); det.firstElementChild.innerHTML = String(approvalDetailHtml(a)); det.hidden = false;
+  } else { apprState.open.delete(id); det.hidden = true; det.firstElementChild.innerHTML = ''; }
+  trig.setAttribute('aria-expanded', String(open)); trig.textContent = open ? 'Close details' : 'Review & decide'; setTimeout(() => trig.focus(), 0); /* the clicked button is disabled until run() finishes */
+};
+const lockAppr = (root, on) => $$('button,input', root).forEach(b => { b.disabled = on; });
+async function apprDecide(t, verb, body, okMsg) {
+  const root = t.closest('.appr-detail'), msg = $('.appr-msg', root); msg.textContent = ''; lockAppr(root, true);
+  try { await post(`/api/admin/approvals/${enc(t.dataset.id)}/${verb}`, body); apprState.open.delete(t.dataset.id); toast(okMsg, 'ok'); await reloadApprovals(); }
+  catch (e) {
+    if (!(e instanceof ApiError)) throw e;
+    msg.textContent = e.message + (e.status === 409 || e.status === 404 ? ' The list was refreshed.' : '');
+    if (e.status === 409 || e.status === 404) await reloadApprovals();
+  } finally { if (root.isConnected) lockAppr(root, false); }
+}
+A['appr-approve'] = t => apprDecide(t, 'approve', { uses: Number(t.dataset.uses || 1), ttl_seconds: t.dataset.ttl ? Number(t.dataset.ttl) : null, fingerprint: t.dataset.fp }, 'Approved');
+A['appr-deny-open'] = t => { const b = $('.deny-box', t.closest('.appr-detail')); b.hidden = false; $('input', b).focus(); };
+A['appr-deny-cancel'] = t => { const root = t.closest('.appr-detail'); $('.deny-box', root).hidden = true; $('[data-act="appr-deny-open"]', root).focus(); };
+A['appr-deny'] = t => apprDecide(t, 'deny', { reason: $('input[name=reason]', t.closest('.appr-detail')).value.trim(), fingerprint: t.dataset.fp }, 'Denied');
+A['copy-text'] = async t => {
+  const root = t.closest('[data-copy-root]'), src = root && $('pre,code', root), text = t.dataset.copy != null ? t.dataset.copy : src ? src.textContent : '';
+  try { await navigator.clipboard.writeText(text); }
+  catch { if (src) { const r = doc.createRange(); r.selectNodeContents(src); const s = getSelection(); s.removeAllRanges(); s.addRange(r); try { doc.execCommand('copy'); } catch { /* selection stays for manual copy */ } } }
+  const old = t.textContent; t.textContent = 'Copied'; setTimeout(() => { if (t.isConnected) t.textContent = old; }, 1500);
+};
+
+/* ---- staged discovery */
+const HOST_STATE = { local: ['This machine', 'accent'], new: ['New', 'info'], existing: ['Existing', 'ok'], excluded: ['Excluded', 'off'], offline: ['Offline', 'off'], stale: ['Stale', 'warn'], auth_required: ['Authentication required', 'warn'], host_key_review: ['Host key review', 'warn'], human_check: ['Needs human check', 'warn'], enrollment_required: ['Enrollment required', 'info'], no_ssh_route: ['No SSH route', 'warn'], failed: ['Failed', 'bad'] };
+const hostStateText = s => (HOST_STATE[s] || [s || 'Unknown'])[0];
+const hostStateBadge = s => badge(hostStateText(s), (HOST_STATE[s] || [])[1] || 'off');
+const PROV = { tailscale: 'Tailscale', mesh: 'Cloudflare Mesh', ssh_config: 'SSH config', ssh_target: 'SSH targets', worker: 'Workers' };
+const AXES = ['dns', 'ssh', 'bootstrap', 'process'];
+const lastSeen = h => Math.max(0, ...arr(h.sources).map(s => Number(s.observed_at) || 0), ...AXES.map(k => Number(((h.axes || {})[k] || {}).observed_at) || 0));
+const sshText = h => h.ssh ? `${h.ssh.user ? h.ssh.user + '@' : ''}${h.ssh.endpoint || h.ssh.alias || ''}${h.ssh.port && h.ssh.port !== 22 ? ':' + h.ssh.port : h.ssh.endpoint ? ':22' : ''}` : '';
+const hostName = h => h.display_name || h.id;
+function scanVisible(snap, f = {}) {
+  const q = String(f.q || '').trim().toLowerCase(), key = f.sort || 'name', dir = f.dir === -1 ? -1 : 1;
+  const hay = h => [h.id, h.display_name, ...arr(h.aliases), ...arr(h.addresses), ...arr(h.dns_names), sshText(h), hostStateText(h.state), h.next_action, ...arr(h.sources).map(s => s.provider)].join(' ').toLowerCase();
+  const val = h => key === 'state' ? hostStateText(h.state) : key === 'seen' ? lastSeen(h) : key === 'source' ? arr(h.sources).map(s => s.provider).sort().join() : hostName(h).toLowerCase();
+  return arr(snap && snap.hosts).filter(h => (!q || hay(h).includes(q)) && (!f.state || h.state === f.state))
+    .sort((a, b) => { const x = val(a), y = val(b); return (x < y ? -1 : x > y ? 1 : 0) * dir; });
+}
+const EMPTY = {
+  not_scanned: ['Not scanned yet', 'No inventory has been read yet. Choose List hosts to read local and provider inventory. This step makes no remote contact.'],
+  no_provider: ['No discovery provider installed', 'None of Tailscale, Cloudflare Mesh, SSH config or a worker is available on this machine, so there is nothing to list. Install one, or add hosts manually.'],
+  provider_unavailable: ['Discovery provider unavailable', 'A provider is installed but cannot answer right now. See the provider status above for the exact remedy, then list hosts again.'],
+  no_peers: ['No peers visible', 'The providers answered but report no other machines visible from this host.'],
+};
+function scanEmptyHtml(reason) {
+  const [t, m] = EMPTY[reason] || ['No hosts found', 'Discovery returned no hosts.'];
+  return H`<div class="empty scan-empty" data-reason="${reason || 'none'}"><b>${t}</b><p>${m}</p><button type="button" class="sm" data-act="scan-focus-manual">Add a host manually</button></div>`;
+}
+function scanProvidersHtml(snap) {
+  const P = Object.entries((snap && snap.providers) || {});
+  if (!P.length) return '';
+  return H`<ul class="prov-row" aria-label="Discovery providers">${P.map(([k, p]) => H`<li><b>${PROV[k] || k}</b> ${badge(p.state || 'unknown', /^(ok|ready|available|connected|active)$/.test(p.state) ? 'ok' : /unavailable|missing|error|failed/.test(p.state) ? 'bad' : 'warn')}
+    <span class="small muted">${p.candidates != null ? p.candidates + ' candidate(s)' : ''}${p.account ? ' · ' + p.account : ''}${p.observed_at ? ' · ' + rel(p.observed_at) : ''}</span>${p.remedy ? H`<div class="small">${p.remedy}</div>` : ''}${p.error ? H`<div class="small">Error: ${p.error}</div>` : ''}</li>`)}</ul>`;
+}
+function scanAxesHtml(h) {
+  return H`<span class="axes">${AXES.map(k => { const a = (h.axes || {})[k]; return H`<span class="axis">${k}: ${a ? a.result : 'not checked'}${a && a.freshness === 'stale' ? ' (stale)' : a && a.freshness ? ' (fresh)' : ''}</span>`; })}</span>`;
+}
+function scanHostDetailHtml(h, hk) {
+  const ax = h.axes || {}, inv = h.inventory;
+  return H`<div class="host-detail" data-host="${h.id}">
+    ${h.excluded ? H`<p class="alert warning small"><span><b>Excluded — never contacted</b>(matched: ${h.exclusion_match || 'exclusion list'})</span></p>` : ''}
+    <p class="small"><b>Next action:</b> ${h.next_action || 'none'}</p>
+    <div class="detail-grid">
+    <section><h4>Connectivity</h4>${kv([['Addresses', arr(h.addresses).length ? H`<code>${arr(h.addresses).join(', ')}</code>` : null], ['DNS names', arr(h.dns_names).length ? H`<code>${arr(h.dns_names).join(', ')}</code>` : null], ['Aliases', arr(h.aliases).join(', ') || null], ['Online', h.online == null ? 'unknown' : yes(h.online)], ['OS / kind', [h.os, h.kind].filter(Boolean).join(' / ') || null], ['Managed', yes(!!h.managed)]])}
+      ${arr(h.sources).length ? H`<ul class="small">${h.sources.map(s => H`<li><b>${PROV[s.provider] || s.provider}</b> ${s.record_id ? H`<code>${s.record_id}</code>` : ''} online: ${s.online == null ? 'unknown' : yes(s.online)}, confidence ${s.confidence ?? 'n/a'}, ${s.observed_at ? 'seen ' + rel(s.observed_at) : 'never seen'}${s.evidence ? H`<div class="muted">${typeof s.evidence === 'string' ? s.evidence : JSON.stringify(s.evidence)}</div>` : ''}</li>`)}</ul>` : H`<p class="small muted">No source has reported this host.</p>`}</section>
+    <section><h4>SSH</h4>${h.ssh ? kv([['Alias', h.ssh.alias ? H`<code>${h.ssh.alias}</code>` : null], ['Endpoint', H`<code>${sshText(h)}</code> ${copyBtn('Copy', sshText(h))}`], ['Port', h.ssh.port], ['User', h.ssh.user], ['Jump host', h.ssh.jump], ['Effective config', h.ssh.needs_effective_config ? 'not resolved yet' : 'resolved']]) : H`<p class="small muted">No SSH route is known for this host.</p>`}</section>
+    <section><h4>Axes</h4><ul class="small">${AXES.map(k => { const a = ax[k]; return H`<li><b>${k}</b>: ${a ? a.result : 'not checked'}${a && a.freshness ? ', ' + a.freshness : ''}${a && a.duration_ms != null ? ', ' + a.duration_ms + ' ms' : ''}${a && a.observed_at ? ', ' + rel(a.observed_at) : ''}${a && a.error ? H`<div class="axis-error">Error: ${a.error}</div>` : ''}${a && a.detail ? H`<div class="muted">${typeof a.detail === 'string' ? a.detail : JSON.stringify(a.detail)}</div>` : ''}</li>`; })}</ul></section>
+    <section><h4>Inventory</h4>${inv ? kv([['Hostname', inv.hostname], ['OS', inv.os], ['Kernel', inv.kernel], ['Architecture', inv.arch], ['User', inv.user], ['Machine kind', inv.machine_kind]]) : H`<p class="small muted">No inventory yet. Probe this host to collect it.</p>`}</section>
+    <section><h4>Conflicts</h4>${arr(h.conflicts).length ? H`<ul class="small">${h.conflicts.map(c => H`<li>${c.kind || 'conflict'}: ${c.name || ''} — ${c.resolution || 'unresolved'}</li>`)}</ul>` : H`<p class="small muted">No conflicting records.</p>`}</section></div>
+    ${h.state === 'host_key_review' ? H`<section class="hostkey"><h4>Host key review</h4><p class="small">Compare the fingerprint with one you trust before confirming. Nothing is trusted until you confirm.</p><button type="button" class="sm" data-act="scan-hostkey-scan" data-id="${h.id}">Review host key</button>
+      ${hk ? H`${hk.note ? H`<p class="small muted">${hk.note}</p>` : ''}${arr(hk.fingerprints).length ? H`<ul class="fps">${hk.fingerprints.map(l => { const m = /SHA256:[A-Za-z0-9+/=]+/.exec(l); return H`<li><code>${l}</code> ${m ? H`<button type="button" class="sm" data-act="scan-hostkey-confirm" data-id="${h.id}" data-fp="${m[0]}">Confirm this fingerprint</button>` : ''}</li>`; })}</ul>` : H`<p class="small">No fingerprints returned.</p>`}` : ''}</section>` : ''}
+    <div class="row"><button type="button" class="sm ghost" data-act="scan-toggle" data-id="${h.id}">Close details</button></div></div>`;
+}
+const sortTh = (label, key, f) => H`<th aria-sort="${(f.sort || 'name') === key ? (f.dir === -1 ? 'descending' : 'ascending') : 'none'}"><button type="button" class="linklike" data-act="scan-sort" data-sort="${key}">${label}${(f.sort || 'name') === key ? (f.dir === -1 ? ' ▼' : ' ▲') : ''}</button></th>`;
+function scanHostsTableHtml(snap, f = {}) {
+  const all = arr(snap && snap.hosts);
+  if (!all.length) return scanEmptyHtml(snap && snap.empty_reason);
+  const rows = scanVisible(snap, f);
+  if (!rows.length) return H`<div class="empty">No hosts match the current filter (${all.length} hidden).</div>`;
+  const allSel = rows.every(h => h.excluded || has(f.sel, h.id));
+  return H`<div class="tw"><table class="stack scan-table"><thead><tr><th><input type="checkbox" data-change="scan-select-all" aria-label="Select all visible hosts"${chk(allSel)}></th>${sortTh('Host', 'name', f)}${sortTh('Source', 'source', f)}${sortTh('State', 'state', f)}<th>SSH</th><th>Axes</th>${sortTh('Last observed', 'seen', f)}<th>Next action</th></tr></thead><tbody>${rows.map(h => {
+    const o = has(f.open, h.id), seen = lastSeen(h);
+    return H`<tr data-id="${h.id}" data-state="${h.state}"><td data-label="Select"><input type="checkbox" data-change="scan-select" data-id="${h.id}" aria-label="Select ${hostName(h)}"${chk(has(f.sel, h.id))}${h.excluded ? raw(' disabled') : ''}></td>
+      <td data-label="Host"><button type="button" class="linklike host-name" data-act="scan-toggle" data-id="${h.id}" aria-expanded="${o ? 'true' : 'false'}" aria-controls="scan-d-${h.id}">${hostName(h)}</button>${arr(h.aliases).length ? H`<div class="small muted wrap">${arr(h.aliases).join(', ')}</div>` : ''}</td>
+      <td data-label="Source">${arr(h.sources).length ? arr(h.sources).map(s => H`${badge(PROV[s.provider] || s.provider)} `) : H`<span class="muted small">none</span>`}</td>
+      <td data-label="State">${hostStateBadge(h.state)}${h.excluded ? H`<div class="small">Excluded — never contacted (matched: ${h.exclusion_match || 'exclusion list'})</div>` : ''}</td>
+      <td data-label="SSH">${h.ssh ? H`<code class="wrap">${sshText(h)}</code> ${copyBtn('Copy', sshText(h))}${h.ssh.alias ? H`<div class="small muted">alias ${h.ssh.alias}</div>` : ''}` : H`<span class="muted small">—</span>`}</td>
+      <td data-label="Axes">${scanAxesHtml(h)}</td><td data-label="Last observed">${seen ? rel(seen) : 'never'}</td><td data-label="Next action"><span class="wrap">${h.next_action || ''}</span></td></tr>
+      <tr class="detail-row" id="scan-d-${h.id}"${o ? '' : raw(' hidden')}><td colspan="8">${o ? scanHostDetailHtml(h, (f.hostkeys || {})[h.id]) : ''}</td></tr>`;
+  })}</tbody></table></div>`;
+}
+const STAGE_KIND = { running: 'info', done: 'ok', cancelled: 'off', interrupted: 'warn', failed: 'bad', skipped: 'off' };
+function scanStagesHtml(run) {
+  if (!run) return H`<p class="small muted">No probe has run yet. Select hosts and choose Probe selected.</p>`;
+  const S = run.stages || {}, ids = Object.keys(S).sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1))), p = run.progress || {};
+  return H`<div class="stage-strip" role="group" aria-label="Probe stages"><div class="row"><b>Run ${run.id}</b> ${badge(run.status, STAGE_KIND[run.status])}<span class="small">${p.done ?? 0} of ${p.total ?? 0} host(s) done</span>${run.status === 'running' ? H`<progress max="${p.total || 1}" value="${p.done || 0}"></progress><button type="button" class="sm danger" data-act="scan-cancel" data-id="${run.id}">Cancel</button>` : ''}</div>
+    <ol class="stages">${ids.map(id => H`<li class="stage ${S[id].state}"><b>${id}</b> <span>${S[id].title}</span> <em>${S[id].state}</em></li>`)}</ol>
+    ${Object.keys(run.hosts || {}).length ? H`<ul class="small outcomes">${Object.entries(run.hosts).map(([id, r]) => H`<li><code>${id}</code>: ${r.outcome}</li>`)}</ul>` : ''}</div>`;
+}
+function scanManualListHtml(manual) {
+  manual = arr(manual);
+  return manual.length ? H`<ul class="manual-list">${manual.map(m => H`<li><code>${m.user ? m.user + '@' : ''}${m.host}:${m.port || 22}</code>${m.label ? ' ' + m.label : ''}${m.jump ? H` <span class="small muted">via ${m.jump}</span>` : ''} <button type="button" class="sm danger" data-act="scan-manual-del" data-id="${m.id || m.entry_id}">Remove</button></li>`)}</ul>` : '';
+}
+function enrollPlanHtml(plan) {
+  if (!plan) return '';
+  const done = plan.status === 'applied' || plan.status === 'partial';
+  return H`<section class="plan-review" aria-label="Enrollment plan"><h3>Enrollment plan ${plan.status ? badge(plan.status, plan.status === 'applied' ? 'ok' : 'warn') : badge('review', 'info')}</h3>
+    ${plan.note ? H`<p class="small muted">${plan.note}</p>` : ''}
+    ${arr(plan.steps).length ? H`<div class="tw"><table class="stack"><thead><tr><th>Host</th><th>Action</th><th>Name</th><th>Change made</th><th>Privilege</th><th>Requires</th><th>Rollback</th>${done ? H`<th>Result</th>` : ''}</tr></thead><tbody>${plan.steps.map(s => H`<tr><td data-label="Host"><code>${s.host_id}</code></td><td data-label="Action">${s.action}</td><td data-label="Name">${s.name}</td><td data-label="Change made"><span class="wrap">${s.mutation}</span></td><td data-label="Privilege">${s.privilege || 'none'}</td><td data-label="Requires"><span class="wrap">${[].concat(s.requires || []).join(', ') || '—'}</span></td><td data-label="Rollback"><span class="wrap">${s.rollback || 'none'}</span></td>${done ? H`<td data-label="Result">${s.error ? 'Failed: ' + s.error : s.done ? 'Done' : 'Not run'}</td>` : ''}</tr>`)}</tbody></table></div>` : H`<div class="empty">The plan has no steps.</div>`}
+    ${arr(plan.blocked).length ? H`<div class="alert warning"><span><b>Blocked hosts (not in this plan)</b><ul>${plan.blocked.map(b => H`<li><code>${b.host_id}</code>: ${b.reason}</li>`)}</ul></span></div>` : ''}
+    ${done ? '' : H`<div class="row"><button type="button" class="primary" data-act="scan-apply" data-id="${plan.id}"${arr(plan.steps).length ? '' : raw(' disabled')}>Apply plan</button><span class="small muted">Applies every change listed above. Nothing runs until you press this.</span></div>`}</section>`;
+}
+const scanActionsHtml = n => H`<button type="button" id="scan-probe" class="sm" data-act="scan-probe"${n ? '' : raw(' disabled')}>Probe selected (${n})</button><button type="button" id="scan-plan-btn" class="sm" data-act="scan-plan"${n ? '' : raw(' disabled')}>Plan enrollment (${n})</button>`;
+function scanCardHtml(snap) {
+  const stateOpts = Object.keys(HOST_STATE);
+  const counts = snap && snap.counts ? Object.entries(snap.counts).filter(([, n]) => n) : [];
+  return card('Hosts & staged discovery', snap ? H`<div id="scan-root">
+    <p class="section-desc">List reads local and provider inventory only. Probing contacts the hosts you select. Excluded hosts are never contacted.</p>
+    <div id="scan-providers">${scanProvidersHtml(snap)}</div>
+    <div id="scan-counts" class="chips">${counts.map(([k, n]) => badge(`${hostStateText(k)}: ${n}`, (HOST_STATE[k] || [])[1]))}</div>
+    <div id="scan-stages">${scanStagesHtml(arr(snap.runs)[0] && arr(snap.runs)[0].stages ? snap.runs[0] : null)}</div>
+    <div class="row toolbar"><div class="field inline"><label for="scan-q">Filter hosts</label><input id="scan-q" type="search" data-input="scan-filter" placeholder="name, address, alias, state…" autocomplete="off"></div>
+      <div class="field inline"><label for="scan-state">State</label><select id="scan-state" data-change="scan-state"><option value="">All states</option>${stateOpts.map(k => opt(k, '', hostStateText(k)))}</select></div>
+      <span id="scan-actions" class="row">${scanActionsHtml(0)}</span></div>
+    <div id="scan-table" aria-live="polite">${scanHostsTableHtml(snap, {})}</div>
+    <div id="scan-plan"></div>
+    <section class="manual" id="scan-manual"><h3>Add a host manually</h3><form data-form="scan-manual" novalidate>${errBox}<div class="fields">
+      ${fld('Host', 'sm_host', inp('host', '', { req: true, ph: 'build-box.example.com' }))}${fld('Port', 'sm_port', inp('port', '22', { type: 'number', extra: 'min="1" max="65535"' }))}
+      ${fld('User', 'sm_user', inp('user', '', { ph: 'optional' }))}${fld('Label', 'sm_label', inp('label', '', { ph: 'optional' }))}${fld('Jump host', 'sm_jump', inp('jump', '', { ph: 'optional alias' }))}</div>
+      <div class="row end"><button type="submit" class="primary">Add host</button></div></form><div id="scan-manual-list">${scanManualListHtml(snap.manual)}</div></section></div>`
+    : H`<p class="muted">Staged discovery is unavailable in this runtime.</p>`, { cls: 'c12', actions: snap ? H`<button type="button" class="sm" data-act="scan-list">List hosts</button>` : '' });
+}
+const MESH_STATE = { missing_binary: 'Not installed', service_down: 'Installed, service not running', unregistered: 'Installed, not registered with an organization', registered_disconnected: 'Registered, not connected', connected: 'Connected' };
+function meshCardHtml(d) {
+  if (!d) return H`<p class="muted">Mesh status is unavailable in this runtime.</p>`;
+  const det = d.detection || {}, pre = d.preflight || {}, plat = d.platform || {}, plan = d.plan || {}, blocking = arr(pre.blocking);
+  const dist = Array.isArray(d.distinct_from) ? d.distinct_from.join(', ') : d.distinct_from;
+  const overlap = blocking.some(b => /range|overlap/i.test(String(b)));
+  return H`<p class="section-desc"><b>${d.product || 'Cloudflare Mesh'}</b> is private device-to-device connectivity. It is not public ingress. Distinct from: ${dist || 'Cloudflare Tunnel'}</p>
+    <div class="detail-grid"><section><h4>Detection</h4>${kv([['State', badge(MESH_STATE[det.state] || det.state || 'unknown', det.state === 'connected' ? 'ok' : 'warn')], ['Version', det.version], ['Organization', det.organization], ['Device', det.device_id ? H`<code>${det.device_id}</code>` : undefined], ['Remedy', det.remedy || undefined]])}</section>
+    <section><h4>Platform</h4>${kv([['Supported', plat.supported ? 'yes' : 'no'], ['Reason', plat.reason], ['System', [plat.distro, plat.version, plat.arch].filter(Boolean).join(' ') || undefined]])}</section></div>
+    <h4>Preflight ${badge(pre.ok ? 'passed' : 'needs attention', pre.ok ? 'ok' : 'warn')}</h4>
+    ${overlap ? H`<div class="alert warning" role="alert"><span><b>Coexistence warning</b>Mesh address range ${pre.mesh_range ? H`<code>${pre.mesh_range}</code>` : ''} overlaps another network${pre.tailscale_active ? ' while Tailscale is active' : ''}. Do not apply Mesh enrollment until this is resolved or a reviewed alternative below is chosen.</span></div>` : ''}
+    ${arr(pre.findings).length ? H`<ul class="small findings">${pre.findings.map(f => H`<li>${badge(f.severity || 'info', /crit|high|error|block/i.test(f.severity) ? 'bad' : /warn|medium/i.test(f.severity) ? 'warn' : 'info')} ${f.detail}${blocking.includes(f.id) ? ' (blocking)' : ''}</li>`)}</ul>` : H`<p class="small muted">No preflight findings.</p>`}
+    ${arr(pre.alternatives).length ? H`<h4>Reviewed alternatives</h4><ul class="small">${pre.alternatives.map(a => H`<li><code>${a.id}</code>: ${a.detail}</li>`)}</ul>` : ''}
+    <h4>Plan ${badge(plan.ready ? 'ready' : 'not ready', plan.ready ? 'ok' : 'warn')}</h4>
+    ${arr(plan.blocked).length ? H`<ul class="small">${plan.blocked.map(b => H`<li>Blocked: ${b}</li>`)}</ul>` : ''}
+    ${arr(plan.steps).length ? H`<ol class="plan-steps">${plan.steps.map(s => H`<li><b>${s.title}</b> ${badge(s.privilege || 'none')}${s.skip ? H` ${badge('already done', 'ok')}` : ''}${s.exposure ? H` <span class="small muted">exposure: ${s.exposure}</span>` : ''}</li>`)}</ol>` : ''}
+    ${arr(plan.manual_steps).length ? H`<h4>Manual account steps</h4><ol class="small">${plan.manual_steps.map(m => H`<li>${m}</li>`)}</ol>` : ''}
+    ${arr(plan.verify).length ? H`<h4>Verify</h4><ul class="small">${plan.verify.map(m => H`<li>${m}</li>`)}</ul>` : ''}
+    ${plan.after ? H`<p class="small muted">After: ${plan.after}</p>` : ''}
+    ${d.apply_command ? H`<h4>Apply command</h4><div data-copy-root class="applycmd"><code class="cmd block">${d.apply_command}</code> ${copyBtn('Copy command')}</div><p class="small muted">Applying needs root on the host. Run it in a terminal there. The dashboard cannot apply Mesh enrollment.</p>` : ''}
+    ${d.live_enrollment ? H`<p class="small">${d.live_enrollment}</p>` : ''}`;
+}
+
+/* ---- staged discovery: browser state and handlers */
+const scan = { v: null, snap: null, run: null, sel: new Set(), open: new Set(), q: '', state: '', sort: 'name', dir: 1, plan: null, hostkeys: {}, timer: null };
+function scanInit(v, snap) {
+  clearTimeout(scan.timer); Object.assign(scan, { v, snap, run: null, sel: new Set(), open: new Set(), q: '', state: '', sort: 'name', dir: 1, plan: null, hostkeys: {} });
+  const r = arr(snap && snap.runs)[0]; if (r && r.status === 'running') { scan.run = r; scanPoll(r.id); }
+}
+const scanF = () => ({ q: scan.q, state: scan.state, sort: scan.sort, dir: scan.dir, sel: scan.sel, open: scan.open, hostkeys: scan.hostkeys });
+function keepFocus(fn) {
+  const a = doc.activeElement, keys = ['data-act', 'data-change', 'data-id', 'data-sort'], sel = a && a !== doc.body && a.closest && a.closest('#scan-table') ? keys.filter(k => a.hasAttribute(k)).map(k => `[${k}="${CSS.escape(a.getAttribute(k))}"]`).join('') : '';
+  fn(); if (sel) { const n = $('#scan-table ' + sel); if (n) n.focus(); }
+}
+const drawScanTable = () => keepFocus(() => setHtml('scan-table', scanHostsTableHtml(scan.snap, scanF())));
+function drawScan() {
+  const s = scan.snap || {};
+  setHtml('scan-providers', scanProvidersHtml(s)); setHtml('scan-manual-list', scanManualListHtml(s.manual));
+  setHtml('scan-counts', H`${Object.entries(s.counts || {}).filter(([, n]) => n).map(([k, n]) => badge(`${hostStateText(k)}: ${n}`, (HOST_STATE[k] || [])[1]))}`);
+  drawScanTable(); drawScanActions(); setHtml('scan-plan', enrollPlanHtml(scan.plan));
+}
+function drawScanActions() {
+  const n = scan.sel.size, p = $('#scan-probe'), e = $('#scan-plan-btn'); if (!p || !e) return;
+  p.disabled = e.disabled = !n; p.textContent = `Probe selected (${n})`; e.textContent = `Plan enrollment (${n})`;
+}
+async function loadHosts(snap) {
+  scan.snap = snap || await get('/api/admin/discovery/hosts');
+  const ids = new Set(arr(scan.snap.hosts).map(h => h.id)); scan.sel = new Set([...scan.sel].filter(i => ids.has(i)));
+  if (scan.v && scan.v.alive()) drawScan();
+}
+function scanPoll(id) {
+  clearTimeout(scan.timer); let fails = 0;
+  const tick = async () => {
+    if (!scan.v || !scan.v.alive() || !$('#scan-root')) return;
+    let r; try { r = await get('/api/admin/discovery/runs/' + enc(id), true); } catch { if (++fails < 5) scan.timer = setTimeout(tick, 3000); return; }
+    scan.run = r; setHtml('scan-stages', scanStagesHtml(r));
+    if (r.status === 'running') scan.timer = setTimeout(tick, 1500); else { try { await loadHosts(); } catch { /* shown on next manual load */ } }
+  };
+  scan.timer = setTimeout(tick, 1500);
+}
+A['scan-list'] = async t => { const old = t.textContent; t.innerHTML = '<span class="spin"></span> Listing'; try { await loadHosts(await post('/api/admin/discovery/hosts/list')); toast('Hosts listed', 'ok'); } finally { if (t.isConnected) t.textContent = old; } };
+I['scan-filter'] = t => { scan.q = t.value; drawScanTable(); };
+C['scan-state'] = t => { scan.state = t.value; drawScanTable(); };
+C['scan-select'] = t => { t.checked ? scan.sel.add(t.dataset.id) : scan.sel.delete(t.dataset.id); drawScanActions(); };
+C['scan-select-all'] = t => { scanVisible(scan.snap, scanF()).filter(h => !h.excluded).forEach(h => t.checked ? scan.sel.add(h.id) : scan.sel.delete(h.id)); drawScanTable(); drawScanActions(); };
+A['scan-sort'] = t => { const k = t.dataset.sort; scan.dir = scan.sort === k ? -scan.dir : 1; scan.sort = k; drawScanTable(); };
+A['scan-toggle'] = t => { const id = t.dataset.id; scan.open.has(id) ? scan.open.delete(id) : scan.open.add(id); drawScanTable(); const n = $(`#scan-table [data-act="scan-toggle"][aria-expanded][data-id="${CSS.escape(id)}"]`); if (n) n.focus(); };
+A['scan-focus-manual'] = () => { const el = $('#sm_host'); if (el) { el.scrollIntoView?.({ block: 'center' }); el.focus(); } };
+A['scan-probe'] = async () => {
+  const run = await post('/api/admin/discovery/probe', { host_ids: [...scan.sel] });
+  scan.run = run; setHtml('scan-stages', scanStagesHtml(run)); if (run.status === 'running') scanPoll(run.id); else await loadHosts();
+};
+A['scan-cancel'] = async t => { const r = await post(`/api/admin/discovery/runs/${enc(t.dataset.id)}/cancel`); if (r && r.status) { scan.run = r; setHtml('scan-stages', scanStagesHtml(r)); } toast('Cancel requested', 'ok'); };
+A['scan-plan'] = async () => { scan.plan = await post('/api/admin/discovery/enroll/plan', { host_ids: [...scan.sel], install_worker: true }); setHtml('scan-plan', enrollPlanHtml(scan.plan)); const b = $('#scan-plan [data-act="scan-apply"]'); if (b) b.focus(); };
+A['scan-apply'] = async t => { scan.plan = await post('/api/admin/discovery/enroll/apply', { plan_id: t.dataset.id }); setHtml('scan-plan', enrollPlanHtml(scan.plan)); toast('Plan ' + (scan.plan.status || 'applied'), scan.plan.status === 'applied' ? 'ok' : 'error'); await loadHosts(); };
+A['scan-hostkey-scan'] = async t => { scan.hostkeys[t.dataset.id] = await post('/api/admin/discovery/hostkey/scan', { host_id: t.dataset.id }); drawScanTable(); };
+A['scan-hostkey-confirm'] = async t => {
+  if (!await confirmDo('Trust this host key?', H`<p>Confirm that <code>${t.dataset.fp}</code> is the fingerprint of <b>${t.dataset.id}</b>. Future SSH connections will trust it.</p>`, 'Trust fingerprint', false)) return;
+  await post('/api/admin/discovery/hostkey/confirm', { host_id: t.dataset.id, fingerprint: t.dataset.fp }); delete scan.hostkeys[t.dataset.id]; toast('Host key confirmed', 'ok'); await loadHosts();
+};
+F['scan-manual'] = async (f, o) => { await post('/api/admin/discovery/manual', { host: o.host, port: o.port || 22, user: o.user, label: o.label, jump: o.jump }); f.reset(); $('#sm_port').value = '22'; toast('Host added', 'ok'); await loadHosts(); };
+A['scan-manual-del'] = async t => { await del('/api/admin/discovery/manual/' + enc(t.dataset.id)); toast('Removed', 'ok'); await loadHosts(); };
+/* ==== APPROVALS-DISCOVERY END */
+/* Staged discovery and the Mesh card slot into the services page after its own cards. */
+{
+  const baseServices = views.services;
+  views.services = async v => {
+    const [snap, mesh] = await Promise.all([soft('/api/admin/discovery/hosts'), soft('/api/admin/mesh')]);
+    scanInit(v, snap);
+    const extra = H`<div class="grid">${scanCardHtml(snap)}${card('Private connectivity: Cloudflare Mesh', H`<div id="mesh-card">${meshCardHtml(mesh)}</div>`, 'c12')}</div>`;
+    const render = v.render.bind(v);
+    return baseServices({ ...v, render: h => render(String(h).replace('<div class="c12" id="discovery-extra"></div>', `<div class="c12" id="discovery-extra">${extra}</div>`)) });
+  };
+}
 F.binding = async (f, o) => {
   let command = [];
   if (o.transport === 'stdio') { try { command = JSON.parse(o.command); } catch { throw new ApiError('Command must be a JSON array of arguments.', 400); } }
@@ -729,7 +1045,9 @@ views.shell = async v => {
     ${card('Unenforced shell acknowledgement', H`${sb.active ? H`<div class="alert ok"><span>The OS sandbox (${sb.backend}) is active; no acknowledgement is needed.</span></div>` :
       al('critical', 'No OS sandbox is active.', H`Acknowledging lets restricted profiles run shell commands <b>without confinement</b>: they can touch anything the service user can. Prefer bubblewrap or Landlock.`)}
       <label class="check"><input type="checkbox" data-change="ack"${chk(ack)}> <span>I understand shell commands may run without OS confinement on this machine<small>Writes <code>sandbox.acknowledge_unenforced</code></small></span></label>`, { cls: 'c6', id: 'ack' })}
-    ${card('Pending approvals', approvalsTable(arr(appr, 'approvals')))}</div>`);
+    ${card('Pending approvals', H`<p class="small muted">Review the complete command before deciding. An approval binds the exact command, working directory, target and caller.</p>${approvalsTable(arr(appr, 'approvals'))}`, { cls: 'c12', actions: H`<button class="sm" data-act="appr-reload">Refresh</button>` })}
+    ${card('Approval history', H`<div id="appr-history" aria-live="polite"><div class="empty">Loading history…</div></div>`, 'c12')}</div>`);
+  loadApprHistory();
 };
 A['set-profile'] = async t => {
   if (!await confirmDo('Switch profile?', H`<p>Switch this machine to <b>${t.dataset.title}</b>? It applies to new MCP calls immediately.</p>`, 'Switch profile', false)) return;

@@ -1,0 +1,5 @@
+{
+  "malformed": {"returncode": 0, "stdout": "Tailscale 1.80.0: status unavailable <html>not json", "stderr": ""},
+  "daemon_down": {"returncode": 1, "stdout": "", "stderr": "failed to connect to local tailscaled; it doesn't appear to be running (is tailscaled running?)"},
+  "missing_binary": {"returncode": 127, "stdout": "", "stderr": "tailscale: command not found"}
+}

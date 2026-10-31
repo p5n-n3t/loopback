@@ -1,0 +1,8 @@
+{
+  "Version": "1.80.0",
+  "BackendState": "Running",
+  "MagicDNSSuffix": "example.ts.net",
+  "CurrentTailnet": {"Name": "example.ts.net", "MagicDNSSuffix": "example.ts.net"},
+  "Self": {"ID": "self1", "HostName": "localbox", "TailscaleIPs": ["100.101.0.1"], "Online": true},
+  "Peer": null
+}

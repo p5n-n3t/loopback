@@ -1,0 +1,12 @@
+{
+  "version": {"returncode": 0, "stdout": "warp-cli 2026.9.1\n", "stderr": ""},
+  "missing": {"returncode": 127, "stdout": "", "stderr": "warp-cli: command not found"},
+  "systemctl_active": {"returncode": 0, "stdout": "active\n", "stderr": ""},
+  "systemctl_inactive": {"returncode": 3, "stdout": "inactive\n", "stderr": ""},
+  "status_connected": {"returncode": 0, "stdout": "Status update: Connected\nSuccess\n", "stderr": ""},
+  "status_disconnected": {"returncode": 0, "stdout": "Status update: Disconnected. Reason: Manual Disconnection\n", "stderr": ""},
+  "status_service_down": {"returncode": 1, "stdout": "", "stderr": "Unable to connect to the CloudflareWARP daemon. Maybe the service is not running?"},
+  "registration_connector": {"returncode": 0, "stdout": "Registration:\n  Account type: Connector\n  Device ID: 0123456789abcdef0123\n  Organization: example-team\n", "stderr": ""},
+  "registration_device": {"returncode": 0, "stdout": "Registration:\n  Account type: Team\n  Device ID: fedcba9876543210fedc\n  Organization: example-team\n", "stderr": ""},
+  "registration_missing": {"returncode": 1, "stdout": "", "stderr": "Error: Registration Missing due to: Registration not found"}
+}

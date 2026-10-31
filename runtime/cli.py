@@ -960,6 +960,7 @@ def print_checks(checks: list[dict[str, Any]]) -> int:
 
 # =============================================================== install
 INGRESS_CHOICES = ("local", "tailscale", "cloudflare", "both", "ngrok")
+PRIVATE_CONNECTIVITY_CHOICES = ("none", "tailscale", "mesh")
 
 
 def refuse_root(allow_root: bool) -> None:
@@ -999,6 +1000,21 @@ def ask_install_questions(args: argparse.Namespace) -> None:
                 die(f"invalid choice: {choice}", 2)
         else:
             args.ingress = "local"
+    if not getattr(args, "private_connectivity", None):
+        if interactive:
+            say("Private connectivity between your machines (optional, separate from ingress):")
+            say("  1) None / existing LAN or SSH (default)")
+            say("  2) Tailscale (already installed and enrolled)")
+            say("  3) Cloudflare Mesh (opt-in; Loopback plans it now, you apply it later with sudo)")
+            try:
+                pc = input("> ").strip() or "1"
+            except EOFError:
+                pc = "1"
+            args.private_connectivity = {"1": "none", "2": "tailscale", "3": "mesh"}.get(pc, pc)
+            if args.private_connectivity not in PRIVATE_CONNECTIVITY_CHOICES:
+                die(f"invalid choice: {pc}", 2)
+        else:
+            args.private_connectivity = "none"
     if args.ingress in ("cloudflare", "both", "ngrok") and not args.host and interactive:
         try:
             args.host = input("Stable public hostname (e.g. loopback.example.com): ").strip() or None
@@ -1164,7 +1180,8 @@ def cmd_install(args: argparse.Namespace) -> int:
     report.set("phase", "stage1")
     report.save()
     argv = [str(py), str(cfg / "cli.py"), "install", "--stage2", "--non-interactive", "--ingress", args.ingress,
-            "--tailscale-mode", args.tailscale_mode, "--source", str(src)]
+            "--tailscale-mode", args.tailscale_mode, "--source", str(src),
+            "--private-connectivity", getattr(args, "private_connectivity", None) or "none"]
     for flag, value in (("--host", args.host), ("--port", args.port),
                         ("--cloudflare-token-file", args.cloudflare_token_file),
                         ("--cloudflare-tunnel-id", args.cloudflare_tunnel_id),
@@ -1289,10 +1306,20 @@ def install_stage2(args: argparse.Namespace) -> int:
             settings = json.loads(Path(args.settings_file).expanduser().read_text(encoding="utf-8"))
             if not isinstance(settings, dict):
                 raise ValueError("settings file must contain a JSON object")
-            allowed = {"port", "bind", "public_host", "display_name", "node_kind", "ingress", "discovery", "maintenance"}
+            allowed = {"port", "bind", "public_host", "display_name", "node_kind", "ingress", "discovery", "maintenance", "mesh_setup"}
             if set(settings) - allowed:
                 raise ValueError("settings file contains unsupported fields; see docs/INSTALLER.md")
+            if "mesh_setup" in settings:
+                import mesh
+
+                parsed, errors = mesh.parse_settings({"schema_version": 1, "mesh": settings["mesh_setup"]})
+                if errors:
+                    raise ValueError("mesh_setup: " + "; ".join(errors))
+                # The token reference stays in the owner's Mesh settings file, not in config.json.
+                settings["mesh_setup"] = {k: v for k, v in parsed["mesh"].items() if k not in {"token_ref", "package_version"}}
             updates.update(settings)
+        if getattr(args, "private_connectivity", None) == "mesh":
+            updates.setdefault("mesh_setup", {})["enabled"] = True
         if args.port:
             updates["port"] = int(args.port)
         if args.ingress in ("cloudflare", "both") and args.host:
@@ -1300,6 +1327,9 @@ def install_stage2(args: argparse.Namespace) -> int:
         ctx.config.save(updates, actor="installer")
         ctx.refresh_auth_urls()
         report.step("config.json", True, f"port={ctx.config.port}")
+        if (ctx.config.data.get("mesh_setup") or {}).get("enabled"):
+            report.step("private connectivity", True, "Cloudflare Mesh selected (opt-in). Review with 'loopback mesh plan', "
+                        "then apply as the owner: sudo loopback mesh apply --settings <file> --yes. Nothing was installed or enrolled.")
     except Exception as exc:  # noqa: BLE001
         report.step("config.json", False, str(exc), fix="fix the option and rerun the installer")
         report.save()
@@ -2257,6 +2287,94 @@ def cmd_node(args: argparse.Namespace) -> int:
     return 0
 
 
+def _mesh_inputs(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any]]:
+    import mesh
+    import scan
+
+    raw: dict[str, Any] = {}
+    if getattr(args, "settings", None):
+        try:
+            raw = json.loads(Path(args.settings).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            die(f"cannot read settings file: {exc}", 2)
+    settings, errors = mesh.parse_settings(raw or mesh.default_settings())
+    if errors:
+        die("invalid Mesh settings:\n  " + "\n  ".join(errors), 2)
+    ts = scan.TailscaleProvider().detect(scan.ScanEnv())
+    addrs = scan.system_runner(["tailscale", "ip"], 4.0)
+    ts["self_addresses"] = [a.strip() for a in (addrs.stdout or "").splitlines() if a.strip()] if addrs.returncode == 0 else []
+    return settings, ts
+
+
+def _mesh_journal(args: argparse.Namespace) -> Path:
+    if getattr(args, "journal", None):
+        return Path(args.journal)
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        return Path("/var/lib/loopback-mesh/journal.json")
+    return cfg_dir() / "mesh_journal.json"
+
+
+def cmd_mesh(args: argparse.Namespace) -> int:
+    """Opt-in Cloudflare Mesh: status, plan, owner-side apply, verify and rollback (see docs/MESH.md)."""
+    import mesh
+    import scan
+
+    action = args.mesh_cmd or "status"
+    runner = scan.system_runner
+    journal = mesh.Journal(_mesh_journal(args))
+    if action == "rollback":
+        if not args.yes:
+            die("rollback removes only resources this installation created; rerun with --yes to confirm", 2)
+        result = mesh.rollback(runner, journal)
+        emit_json(result) if args.json else say(f"removed: {', '.join(result['removed']) or 'nothing'}; "
+                                                 f"failed: {len(result['failed'])}; still owned: {', '.join(result['remaining_owned']) or 'none'}")
+        return 0 if not result["failed"] else 1
+    settings, ts = _mesh_inputs(args)
+    if action == "verify":
+        result = mesh.verify(runner, settings)
+        if args.json:
+            emit_json(result)
+        else:
+            for check in result["checks"]:
+                say(f"{check['outcome']:<11} {check['id']}: {check.get('detail') or ''}")
+        return 0 if result["ok"] else 1
+    det = mesh.detect(runner)
+    check = mesh.preflight(settings, tailscale=ts, routes=mesh.read_routes(runner), detection=det)
+    support = mesh.platform_support(mesh.os_release())
+    plan = mesh.plan(settings, det, check, support)
+    if action in {"status", "plan"}:
+        if args.json:
+            emit_json(plan if action == "plan" else mesh.summary(runner, settings, tailscale=ts))
+            return 0
+        say(f"Cloudflare One Client: {det['state']}" + (f" (organization {det.get('organization')})" if det.get("organization") else ""))
+        say(f"Platform: {'supported' if support.get('supported') else 'unsupported: ' + str(support.get('reason'))}")
+        for f in check["findings"]:
+            say(f"  [{f['severity']}] {f['detail']}")
+        if action == "plan":
+            for step in plan["steps"]:
+                say(f"  {'skip' if step.get('skip') else 'run '} {step['id']:<10} {step['title']}" + (f"  ({step['exposure']})" if step.get("exposure") else ""))
+            for m in plan["manual_steps"]:
+                say(f"  manual: {m}")
+        for b in plan["blocked"]:
+            say(f"BLOCKED: {b}")
+        return 0
+    if action == "apply":
+        if not plan["ready"]:
+            die("plan is blocked:\n  " + "\n  ".join(plan["blocked"]), 2)
+        if not args.yes:
+            for step in plan["steps"]:
+                say(f"  {'skip' if step.get('skip') else 'run '} {step['id']:<10} {step['title']}")
+            die("review the steps above, then rerun with --yes to apply", 2)
+        try:
+            result = mesh.apply(plan, runner, journal)
+        except mesh.MeshError as exc:
+            die(str(exc), 2)
+        emit_json(result) if args.json else say(f"Mesh setup {result['status']}. Journal: {result['journal']}")
+        return 0 if result["status"] == "applied" else 1
+    die(f"unknown mesh action: {action}", 2)
+    return 2
+
+
 def cmd_ssh(args: argparse.Namespace) -> int:
     cfg = cfg_dir()
     require_installed(cfg)
@@ -2566,6 +2684,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("install", cmd_install, "install or update this machine's Loopback")
     sp.add_argument("--non-interactive", action="store_true")
     sp.add_argument("--ingress", choices=INGRESS_CHOICES)
+    sp.add_argument("--private-connectivity", choices=PRIVATE_CONNECTIVITY_CHOICES,
+                    help="private network between machines; 'mesh' records an opt-in Cloudflare Mesh plan (applied later with sudo)")
     sp.add_argument("--host", help="public FQDN (Cloudflare)")
     sp.add_argument("--port", type=int)
     sp.add_argument("--tailscale-mode", choices=("serve", "funnel"), default="serve")
@@ -2689,6 +2809,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("name")
     s = ssub.add_parser("probe")
     s.add_argument("name")
+
+    sp = add("mesh", cmd_mesh, "opt-in Cloudflare Mesh private connectivity (Cloudflare One Client)")
+    msub = sp.add_subparsers(dest="mesh_cmd")
+    for name in ("status", "plan", "apply", "verify", "rollback"):
+        m = msub.add_parser(name)
+        m.add_argument("--settings", metavar="FILE", help="versioned Mesh settings JSON (holds a token reference, never the token)")
+        m.add_argument("--journal", metavar="FILE", help="owned-resource journal (default: per-user config or /var/lib/loopback-mesh)")
+        m.add_argument("--json", action="store_true")
+        m.add_argument("--yes", "-y", action="store_true")
 
     sp = add("autostart", cmd_autostart, "enable/disable start at login/boot")
     sp.add_argument("state", choices=("on", "off", "status"), nargs="?", default="status")

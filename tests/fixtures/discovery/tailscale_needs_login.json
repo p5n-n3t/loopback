@@ -1,0 +1,7 @@
+{
+  "Version": "1.80.0",
+  "BackendState": "NeedsLogin",
+  "AuthURL": "https://login.example.invalid/a/abc123",
+  "Self": null,
+  "Peer": null
+}

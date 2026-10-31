@@ -13,7 +13,7 @@ import re
 import secrets
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -136,6 +136,10 @@ class ApprovalRequired(PolicyError):
         self.approval_id = approval_id
 
 
+class StaleDecision(ValueError):
+    """The approval was already decided, expired, or changed since the operator viewed it."""
+
+
 @dataclass
 class Approval:
     id: str
@@ -146,6 +150,27 @@ class Approval:
     approved: bool = False
     uses_left: int = 1
     target: str = "local"
+    # Safe structured descriptor (v2). The raw command is bound only through ``fingerprint``;
+    # ``detail`` holds a redacted presentation with every hidden value marked.
+    action: str = "command"
+    detail: dict[str, Any] = field(default_factory=dict)
+    principal: str | None = None
+    principal_key: str | None = None
+    status: str = "pending"
+    decided_at: float | None = None
+    decided_by: str | None = None
+    reason: str | None = None
+    grant: dict[str, Any] = field(default_factory=dict)
+
+    def view(self, now: float | None = None) -> dict[str, Any]:
+        now = time.time() if now is None else now
+        data = dict(self.__dict__)
+        data.pop("principal_key", None)
+        if data["status"] in {"pending", "approved"} and self.expires_at <= now:
+            data["status"] = "expired"
+        data["fingerprint_short"] = self.fingerprint[:12]
+        data["expires_in_seconds"] = max(0, int(self.expires_at - now))
+        return data
 
 
 def normalize_roots(values: Any) -> list[dict[str, str]]:
@@ -268,7 +293,18 @@ class PolicyStore:
     def target_policy(self, target: str = "local") -> dict[str, Any]:
         """Effective policy for one target. Remote targets never inherit local roots."""
         if target in {"local", "", None}:
-            return dict(self.data)
+            data = dict(self.data)
+            # Loopback's own state (tokens, approvals, job logs) is never reachable through file or
+            # shell tools, even when an owner's custom policy drops the default denied roots (H03).
+            denied = list(data.get("denied_roots") or [])
+            cfg = self.config_dir.resolve()
+            # A config directory that contains the home directory (test and container layouts) cannot be
+            # denied wholesale; its job logs still are.
+            own = str(cfg / "jobs") if self._within(Path(self.home).resolve(), cfg) else str(cfg)
+            if own not in denied and not any(self._expand(d) == Path(own) for d in denied if isinstance(d, str)):
+                denied.append(own)
+            data["denied_roots"] = denied
+            return data
         tp = dict((self.data.get("targets") or {}).get(target) or {})
         base = {
             "profile": canonical_profile(tp.get("profile") or self.profile),
@@ -367,7 +403,8 @@ class PolicyStore:
                            "Landlock-capable kernel, switch to the admin profile, or acknowledge unenforced shell access in the dashboard")
         return True, None
 
-    def check_command(self, command: str, *, approval_id: str | None = None, target: str = "local") -> None:
+    def check_command(self, command: str, *, approval_id: str | None = None, target: str = "local", cwd: str | None = None,
+                      principal_key: str | None = None, principal: str | None = None) -> None:
         ok, reason = self.shell_enabled(target)
         if not ok:
             raise PolicyError(reason or "shell execution is disabled by policy")
@@ -380,10 +417,18 @@ class PolicyStore:
             return
         for pattern in tp.get("require_approval_patterns") or []:
             if re.search(pattern, command, re.I | re.M):
-                if self._consume(approval_id, "command", f"{target}\0{command}"):
+                # The fingerprint binds command, cwd, target and caller: any change needs a new decision.
+                value = f"{target}\0{command}\0{cwd or ''}\0{principal_key or ''}"
+                if self._consume(approval_id, "command", value):
                     return
-                a = self.request_approval("command", f"{target}\0{command}",
-                                          f"Sensitive shell command on {target} requires Loopback approval", target=target)
+                from redaction import redact_text
+
+                shown, hidden = redact_text(command)
+                detail = {"command": shown, "cwd": cwd, "target": target, "matched_rule": pattern,
+                          "redacted_values": hidden, "length": len(command), "lines": command.count("\n") + 1,
+                          "privilege": "sudo" if re.search(r"(^|[;&|]\s*)sudo\b", command) else "caller"}
+                a = self.request_approval("command", value, f"Sensitive shell command on {target} requires Loopback approval",
+                                          target=target, detail=detail, principal=principal, principal_key=principal_key)
                 raise ApprovalRequired(
                     a.id,
                     f"approval_required:{a.id}: approve it in the Loopback dashboard (Security → Approvals) or use a less restrictive profile",
@@ -451,6 +496,9 @@ class PolicyStore:
     def _fingerprint(self, action: str, value: str) -> str:
         return hashlib.sha256(f"{action}\0{value}".encode()).hexdigest()
 
+    HISTORY_LIMIT = 200
+    HISTORY_SECONDS = 7 * 86400
+
     def _load_approvals(self) -> None:
         with self._lock:
             try:
@@ -459,19 +507,39 @@ class PolicyStore:
                 rows = []
             now = time.time()
             self._approvals = {}
+            self._history: list[Approval] = []
+            known = set(Approval.__dataclass_fields__)
             for row in rows if isinstance(rows, list) else []:
+                if not isinstance(row, dict):
+                    continue
                 try:
-                    a = Approval(**row)
+                    a = Approval(**{k: v for k, v in row.items() if k in known})
                 except TypeError:
                     continue
-                if a.expires_at > now and a.uses_left > 0:
+                if a.status == "pending" and a.approved:
+                    a.status = "approved"  # v1 records
+                if a.status in {"pending", "approved"} and a.expires_at > now and a.uses_left > 0:
                     self._approvals[a.id] = a
+                elif now - (a.decided_at or a.expires_at) < self.HISTORY_SECONDS:
+                    if a.status in {"pending", "approved"}:
+                        a.status = "expired" if a.uses_left > 0 else "consumed"
+                    self._history.append(a)
+            self._history = self._history[-self.HISTORY_LIMIT:]
 
     def _save_approvals(self) -> None:
-        rows = [a.__dict__ for a in self._approvals.values()]
+        rows = [a.__dict__ for a in list(self._approvals.values()) + list(getattr(self, "_history", []))]
         self._write(self.approvals_path, json.dumps(rows, indent=2) + "\n")
 
-    def request_approval(self, action: str, value: str, summary: str, *, target: str = "local") -> Approval:
+    def _retire(self, a: Approval, status: str) -> None:
+        self._approvals.pop(a.id, None)
+        a.status = status
+        if not hasattr(self, "_history"):
+            self._history = []
+        self._history.append(a)
+        self._history = self._history[-self.HISTORY_LIMIT:]
+
+    def request_approval(self, action: str, value: str, summary: str, *, target: str = "local", detail: dict[str, Any] | None = None,
+                         principal: str | None = None, principal_key: str | None = None) -> Approval:
         with self._lock:
             fp = self._fingerprint(action, value)
             now = time.time()
@@ -480,33 +548,72 @@ class PolicyStore:
                     return a
             aid = secrets.token_urlsafe(12)
             a = Approval(id=aid, fingerprint=fp, summary=summary, created_at=now,
-                         expires_at=now + int(self.data.get("approval_ttl_seconds", 900)), target=target)
+                         expires_at=now + int(self.data.get("approval_ttl_seconds", 900)), target=target,
+                         action=action, detail=dict(detail or {}), principal=principal, principal_key=principal_key)
             self._approvals[aid] = a
             self._save_approvals()
             return a
 
-    def approve(self, approval_id: str, *, uses: int = 1, ttl_seconds: int | None = None) -> dict[str, Any]:
+    def _decidable(self, approval_id: str, expected_fingerprint: str | None) -> Approval:
+        a = self._approvals.get(approval_id)
+        if not a:
+            past = next((h for h in reversed(getattr(self, "_history", [])) if h.id == approval_id), None)
+            if past is not None:
+                raise StaleDecision(f"approval was already {past.status}" + (f" by {past.decided_by}" if past.decided_by else ""))
+            raise KeyError("approval not found")
+        if a.expires_at <= time.time():
+            self._retire(a, "expired")
+            self._save_approvals()
+            raise StaleDecision("approval expired before the decision")
+        if expected_fingerprint and not secrets.compare_digest(a.fingerprint[: len(expected_fingerprint)], expected_fingerprint):
+            raise StaleDecision("the action changed since it was displayed; review it again")
+        return a
+
+    def approve(self, approval_id: str, *, uses: int = 1, ttl_seconds: int | None = None, by: str | None = None,
+                expected_fingerprint: str | None = None) -> dict[str, Any]:
         with self._lock:
-            a = self._approvals.get(approval_id)
-            if not a:
-                raise KeyError("approval not found")
+            a = self._decidable(approval_id, expected_fingerprint)
+            if a.approved:
+                raise StaleDecision("approval was already granted" + (f" by {a.decided_by}" if a.decided_by else ""))
             a.approved = True
+            a.status = "approved"
             a.uses_left = max(1, min(int(uses), 100))
             if ttl_seconds is not None:
                 a.expires_at = time.time() + max(30, min(int(ttl_seconds), 86400))
+            a.decided_at = time.time()
+            a.decided_by = by
+            a.grant = {"uses": a.uses_left, "expires_at": a.expires_at,
+                       "scope": "this exact command, working directory, target and caller"}
             self._save_approvals()
-            return a.__dict__.copy()
+            return a.view()
 
-    def deny(self, approval_id: str) -> bool:
+    def deny(self, approval_id: str, *, reason: str | None = None, by: str | None = None,
+             expected_fingerprint: str | None = None) -> bool:
         with self._lock:
-            existed = self._approvals.pop(approval_id, None) is not None
+            try:
+                a = self._decidable(approval_id, expected_fingerprint)
+            except KeyError:
+                return False
+            a.decided_at = time.time()
+            a.decided_by = by
+            a.reason = (reason or "").strip()[:500] or "Denied by an administrator"
+            self._retire(a, "denied")
             self._save_approvals()
-            return existed
+            return True
 
     def pending(self) -> list[dict[str, Any]]:
         now = time.time()
         with self._lock:
-            return [a.__dict__.copy() for a in self._approvals.values() if a.expires_at > now and a.uses_left > 0 and not a.approved]
+            return [a.view(now) for a in self._approvals.values() if a.expires_at > now and a.uses_left > 0 and not a.approved]
+
+    def approvals_history(self, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        now = time.time()
+        with self._lock:
+            rows = [a.view(now) for a in self._approvals.values()] + [a.view(now) for a in getattr(self, "_history", [])]
+        if status:
+            rows = [r for r in rows if r["status"] == status]
+        rows.sort(key=lambda r: r.get("decided_at") or r["created_at"], reverse=True)
+        return rows[: max(1, min(int(limit), 500))]
 
     def _consume(self, approval_id: str | None, action: str, value: str) -> bool:
         if not approval_id:
@@ -518,5 +625,7 @@ class PolicyStore:
             if not secrets.compare_digest(a.fingerprint, self._fingerprint(action, value)):
                 return False
             a.uses_left -= 1
+            if a.uses_left <= 0:
+                self._retire(a, "consumed")
             self._save_approvals()
             return True
