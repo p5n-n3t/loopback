@@ -13,16 +13,17 @@ Resume here if a session ends. Update this file at every commit.
 | Step | Ledger rows | State |
 | --- | --- | --- |
 | Checkpoint file and plan | — | done |
-| Principal-scoped jobs and terminals, log quotas | H02, H03, H22 | done (tests/test_ownership.py) |
-| Parsed browser URL policy, owner-namespaced sessions | H04, H05 (status), H06 (fixture) | done (tests/test_browser_desktop_policy.py) |
-| Per-operation desktop readiness, no default screenshot persistence | H08, H22 | done |
-| Staged discovery contracts, providers, fixtures, API | H18, H19 | done (tests/test_scan_scenarios.py: 30 run, 13 skipped with reasons) |
-| Opt-in Cloudflare Mesh module, CLI, installer choice | H20 | done (tests/test_mesh.py); live enrollment UNVERIFIED |
-| Structured approval detail (backend done) and dashboard polish (agent running) | H21 | in progress |
-| Lab seams: manifests, injection, cleanup | H30 | pending |
-| Disposition ledger and docs | all | pending |
-| Checks, proof, PR | — | pending |
+| Principal-scoped jobs and terminals, quotas, state-dir denial | H02, H03, H22 | done |
+| Parsed browser URL policy, owner-namespaced sessions | H04, H05, H06 | done (fixture level) |
+| Per-operation desktop readiness | H08 | done |
+| Staged discovery engine, API, scenario tests | H18, H19 | done |
+| Opt-in Cloudflare Mesh module, CLI, installer choice | H20 | done; live enrollment UNVERIFIED |
+| Structured approvals and dashboard polish | H21 | done; screenshots in verification set |
+| Lab seams | H30 | done |
+| Disposition ledger | all | done: docs/handoff/DISPOSITION.md |
+| Checks, proof, PR | — | checks pass; proof current; PR opened |
 
 ## Next action
 
-Start the first pending row. Read `docs/handoff/OPUS-HANDOFF.md` section 5 for its acceptance text.
+Pick deferred rows from `docs/handoff/DISPOSITION.md`. Suggested order: H10 shell mode, H11/H12 error and output contract, H13 terminal output, H05 pinned browser installer, H07 desktop broker.
+Preview reseed for screenshots: `/tmp/lbseed/restart.sh` is sandbox-local and not committed; it seeds synthetic data on port 3000.

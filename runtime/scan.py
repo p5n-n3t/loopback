@@ -45,7 +45,7 @@ STAGE_TITLES = {
 }
 # Host states shown in the dashboard. They are deliberately distinct (DASHBOARD-UX.md §3).
 HOST_STATES = ("local", "new", "existing", "excluded", "offline", "stale", "auth_required", "host_key_review",
-               "human_check", "enrollment_required", "failed", "reachable")
+               "human_check", "enrollment_required", "no_ssh_route", "failed", "reachable")
 DEFAULT_LIMITS = {"probe_concurrency": 4, "enroll_concurrency": 2, "command_timeout": 8.0, "scan_timeout": 120.0,
                   "observation_ttl": 900.0, "max_candidates": 500, "max_output": 65536}
 HOST_TOKEN = re.compile(r"^[A-Za-z0-9_.:%-]{1,253}$")
@@ -189,8 +189,13 @@ class TailscaleProvider:
             dns = str(peer.get("DNSName") or "").rstrip(".") or None
             name = str(peer.get("HostName") or (dns.split(".")[0] if dns else key))[:80]
             ips = [str(a) for a in peer.get("TailscaleIPs") or [] if isinstance(a, str)]
+            endpoint = dns or (ips[0] if ips else None)
+            # A tailnet name is a candidate SSH route only. It is used when the operator selects the host,
+            # and Tailscale SSH may then authenticate by identity with no private key (D06/D07).
+            ssh = {"alias": None, "endpoint": endpoint, "port": 22, "user": None, "jump": None, "via": "tailscale",
+                   "identity_ref": False, "needs_effective_config": False} if endpoint else None
             out.append(candidate("tailscale", str(peer.get("ID") or key), name=name, env=env, account=account, addresses=ips,
-                                 dns_name=dns, online=bool(peer.get("Online")), os_name=peer.get("OS") or None,
+                                 dns_name=dns, online=bool(peer.get("Online")), os_name=peer.get("OS") or None, ssh=ssh,
                                  evidence="visible in tailscale status", extra={
                                      "last_seen": peer.get("LastSeen"),
                                      "tailscale_ssh": bool(peer.get("SSH_HostKeys")),
@@ -446,7 +451,9 @@ def merge_candidates(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]
                       if r["provider"] in {"worker", "ssh_target", "tailscale", "mesh", "ssh_config", "manual"} else 9)
         primary = recs[0]
         aliases = sorted({r["name"] for r in recs if r.get("name")} | {r["dns_name"] for r in recs if r.get("dns_name")})
-        ssh = next((r["ssh"] for r in recs if r.get("ssh")), None)
+        ssh_order = ["ssh_target", "ssh_config", "manual", "worker", "mesh", "tailscale"]
+        ssh = next((r["ssh"] for r in sorted(recs, key=lambda r: ssh_order.index(r["provider"]) if r["provider"] in ssh_order else 9)
+                    if r.get("ssh")), None)
         hosts.append({
             "id": host_id_for(primary), "display_name": primary.get("name"), "aliases": aliases,
             "provider_ids": {r["provider"]: r["record_id"] for r in recs},
@@ -735,7 +742,7 @@ class StagedScanner:
         reach = (host.get("axes") or {}).get("ssh")
         if reach and freshness(reach, now) == "fresh":
             mapping = {"ok": "enrollment_required", "auth_required": "auth_required", "host_key_unknown": "host_key_review",
-                       "human_check_required": "human_check", "host_key_mismatch": "failed"}
+                       "human_check_required": "human_check", "host_key_mismatch": "failed", "no_access_route": "no_ssh_route"}
             if reach["result"] in mapping:
                 return mapping[reach["result"]]
             return "offline" if reach["result"] in {"unreachable", "timeout", "dns_failure"} else "failed"
@@ -757,6 +764,7 @@ class StagedScanner:
             "host_key_review": "Review and confirm the host key fingerprint before Loopback trusts it.",
             "human_check": "Tailscale SSH needs a browser check. Complete it, then retry this host.",
             "enrollment_required": "SSH works. Preview the enrollment plan to register it and install a worker.",
+            "no_ssh_route": "No SSH route is known. Add an OpenSSH alias or a manual entry for this host.",
             "failed": "The last probe failed. Open the host for the exact layer and retry.",
         }.get(host.get("state", ""), "Probe the host.")
 

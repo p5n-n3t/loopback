@@ -746,7 +746,7 @@ A['copy-text'] = async t => {
 };
 
 /* ---- staged discovery */
-const HOST_STATE = { local: ['This machine', 'accent'], new: ['New', 'info'], existing: ['Existing', 'ok'], excluded: ['Excluded', 'off'], offline: ['Offline', 'off'], stale: ['Stale', 'warn'], auth_required: ['Authentication required', 'warn'], host_key_review: ['Host key review', 'warn'], human_check: ['Needs human check', 'warn'], enrollment_required: ['Enrollment required', 'info'], failed: ['Failed', 'bad'] };
+const HOST_STATE = { local: ['This machine', 'accent'], new: ['New', 'info'], existing: ['Existing', 'ok'], excluded: ['Excluded', 'off'], offline: ['Offline', 'off'], stale: ['Stale', 'warn'], auth_required: ['Authentication required', 'warn'], host_key_review: ['Host key review', 'warn'], human_check: ['Needs human check', 'warn'], enrollment_required: ['Enrollment required', 'info'], no_ssh_route: ['No SSH route', 'warn'], failed: ['Failed', 'bad'] };
 const hostStateText = s => (HOST_STATE[s] || [s || 'Unknown'])[0];
 const hostStateBadge = s => badge(hostStateText(s), (HOST_STATE[s] || [])[1] || 'off');
 const PROV = { tailscale: 'Tailscale', mesh: 'Cloudflare Mesh', ssh_config: 'SSH config', ssh_target: 'SSH targets', worker: 'Workers' };
