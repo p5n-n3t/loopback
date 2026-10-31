@@ -94,6 +94,21 @@ class InstallerTests(unittest.TestCase):
         settings.write_text('{"sandbox":{"backend":"none"}}')
         self.assertEqual(self.install(['--settings-file', str(settings)])[0], 1)
 
+    def test_mesh_is_a_separate_opt_in_private_connectivity_choice(self):
+        settings = self.root / 'mesh-settings.json'
+        settings.write_text('{"mesh_setup":{"organization":"example-team","token_ref":"env:MESH_TOKEN"}}')
+        rc, output = self.install(['--settings-file', str(settings), '--private-connectivity', 'mesh'])
+        self.assertEqual(rc, 0, output)
+        mesh_cfg = self.ctx.config.data['mesh_setup']
+        self.assertTrue(mesh_cfg['enabled'])
+        self.assertEqual(mesh_cfg['organization'], 'example-team')
+        self.assertNotIn('token_ref', mesh_cfg, 'the token reference stays in the owner settings file')
+        self.assertEqual(self.ctx.config.data['ingress']['cloudflare'].get('enabled', False), False, 'Mesh never enables Tunnel ingress')
+        report = (self.root / 'install-report.json').read_text()
+        self.assertIn('Nothing was installed or enrolled', report)
+        settings.write_text('{"mesh_setup":{"token_ref":"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"}}')
+        self.assertEqual(self.install(['--settings-file', str(settings)])[0], 1)
+
     def test_report_human_default_and_explicit_json(self):
         (self.root / 'install-report.json').write_text('{"ok":true,"steps":[{"name":"health","ok":true,"detail":"ready"}]}')
         for args, machine in ((['report'], False), (['report', '--json'], True)):

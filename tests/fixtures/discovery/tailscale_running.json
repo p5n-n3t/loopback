@@ -1,0 +1,12 @@
+{
+  "Version": "1.80.0",
+  "BackendState": "Running",
+  "MagicDNSSuffix": "example.ts.net",
+  "CurrentTailnet": {"Name": "example.ts.net", "MagicDNSSuffix": "example.ts.net"},
+  "Self": {"ID": "self1", "HostName": "localbox", "DNSName": "localbox.example.ts.net.", "TailscaleIPs": ["100.101.0.1"], "Online": true},
+  "Peer": {
+    "nodekey:aaaa01": {"ID": "n1", "HostName": "lab1", "DNSName": "lab1.example.ts.net.", "TailscaleIPs": ["100.101.0.10"], "OS": "linux", "Online": true, "LastSeen": "2026-10-31T10:00:00Z"},
+    "nodekey:aaaa02": {"ID": "n2", "HostName": "build1", "DNSName": "build1.example.ts.net.", "TailscaleIPs": ["100.101.0.11"], "OS": "linux", "Online": true, "SSH_HostKeys": ["ssh-ed25519 AAAA"], "LastSeen": "2026-10-31T10:00:00Z"},
+    "nodekey:aaaa03": {"ID": "n3", "HostName": "laptop", "DNSName": "laptop.example.ts.net.", "TailscaleIPs": ["100.101.0.12"], "OS": "macOS", "Online": false, "LastSeen": "2026-10-29T08:00:00Z"}
+  }
+}

@@ -16,9 +16,9 @@ Resume here if a session ends. Update this file at every commit.
 | Principal-scoped jobs and terminals, log quotas | H02, H03, H22 | done (tests/test_ownership.py) |
 | Parsed browser URL policy, owner-namespaced sessions | H04, H05 (status), H06 (fixture) | done (tests/test_browser_desktop_policy.py) |
 | Per-operation desktop readiness, no default screenshot persistence | H08, H22 | done |
-| Staged discovery contracts, providers, fixtures, API | H18, H19 | code done (runtime/scan.py, scan_api.py); scenario tests pending |
-| Opt-in Cloudflare Mesh module | H20 | code done (runtime/mesh.py); CLI + tests pending |
-| Structured approval detail and dashboard polish | H21 | pending |
+| Staged discovery contracts, providers, fixtures, API | H18, H19 | done (tests/test_scan_scenarios.py: 30 run, 13 skipped with reasons) |
+| Opt-in Cloudflare Mesh module, CLI, installer choice | H20 | done (tests/test_mesh.py); live enrollment UNVERIFIED |
+| Structured approval detail (backend done) and dashboard polish (agent running) | H21 | in progress |
 | Lab seams: manifests, injection, cleanup | H30 | pending |
 | Disposition ledger and docs | all | pending |
 | Checks, proof, PR | — | pending |

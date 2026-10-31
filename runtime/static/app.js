@@ -364,13 +364,9 @@ function sandboxHtml(sb) {
     ${kv([['Backend', H`<code>${sb.backend}</code>`], ['Requested', sb.requested], ['Available', yes(sb.available)], ['Active', okb(sb.active, 'active', 'inactive')], ['ABI', sb.abi], ['Denied sub-paths enforced', yn(sb.enforces_denied_subpaths)], ['Require enforcement', yn(sb.require_enforcement)], ['Unenforced acknowledged', yn(sb.acknowledge_unenforced)]])}
     ${arr(sb.caveats).length ? H`<p class="small muted">Caveats:</p><ul class="small">${sb.caveats.map(c => H`<li>${c}</li>`)}</ul>` : ''}`;
 }
-function approvalsTable(list) {
-  return table(['Request', 'Target', 'Requested', 'Expires', ['', 'act']], list.map(a => H`<tr><td>${a.summary}</td><td>${targetBadge(a.target)}</td><td>${time(a.created_at)}</td><td>${time(a.expires_at)}</td>
-    <td class="act"><button class="sm primary" data-act="approve" data-id="${a.id}" data-uses="1">Approve once</button> <button class="sm" data-act="approve" data-id="${a.id}" data-uses="20" data-ttl="3600">Approve 1h</button> <button class="sm danger" data-act="deny" data-id="${a.id}">Deny</button></td></tr>`), 'No pending approvals.');
-}
+/* Pending approvals: the queue renders from approvalsQueueHtml (see the APPROVALS-DISCOVERY block). */
+function approvalsTable(list) { return H`<div id="appr-queue">${approvalsQueueHtml(list, apprState.open)}</div>`; }
 const targetBadge = t => !t || t === 'local' ? badge('local', 'accent') : badge(t, 'info');
-A.approve = async t => { await post(`/api/admin/approvals/${enc(t.dataset.id)}/approve`, { uses: Number(t.dataset.uses || 1), ttl_seconds: t.dataset.ttl ? Number(t.dataset.ttl) : null }); done('Approved'); };
-A.deny = async t => { await post(`/api/admin/approvals/${enc(t.dataset.id)}/deny`); done('Denied'); };
 function auditTable(rows) {
   return table(['When', 'Principal', 'Tool', 'Status', ['ms', 'num'], 'Target'], rows.map(x => {
     const d = x.detail || {};
@@ -590,7 +586,8 @@ A['discovery-refresh'] = async t => {
   finally { if (t.isConnected) t.textContent = old; }
 };
 views.services = async v => {
-  const [fleet, ssh, discovery] = await Promise.all([get('/api/admin/workers'), get('/api/admin/ssh'), soft('/api/admin/discovery')]);
+  const [fleet, ssh, discovery, scanSnap, mesh] = await Promise.all([get('/api/admin/workers'), get('/api/admin/ssh'), soft('/api/admin/discovery'), soft('/api/admin/discovery/hosts'), soft('/api/admin/mesh')]);
+  scanInit(v, scanSnap);
   const B = fleet.bindings || [], W = fleet.workers || [], S = arr(ssh, 'targets', 'ssh');
   const edit = v.params.get('edit'), b = B.find(x => x.name === edit) || {};
   const selectedTarget = b.target || v.params.get('target') || 'local';
@@ -603,6 +600,8 @@ views.services = async v => {
     <div class="grid" data-testid="services-view">
       ${card('Services', H`<div id="service-list">${drawRows(fleet)}</div>`, 'c12')}
       ${card('Discovered routes & gateways', H`<div id="discovery-list">${discoveryHtml(discovery)}</div>`, { cls: 'c12', actions: H`<button class="sm" data-act="discovery-refresh">Rescan hosts</button>` })}
+      ${scanCardHtml(scanSnap)}
+      ${card('Private connectivity: Cloudflare Mesh', H`<div id="mesh-card">${meshCardHtml(mesh)}</div>`, 'c12')}
       ${card(edit ? 'Edit ' + edit : 'New service', H`<form data-form="binding" data-testid="binding-form">${errBox}<div class="fields">
         ${fld('Service name', 'f_name', inp('name', b.name, {req:true, ph:'research-tools', extra:edit ? 'readonly' : 'pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,39}"'}))}
         ${fld('Run on', 'f_target', H`<select id="f_target" name="target">${['local', ...S.map(s => s.name)].map(t => opt(t, selectedTarget, t === 'local' ? 'This machine' : t))}</select>`, 'Install the worker from Fleet before starting a remote service.')}
@@ -729,7 +728,9 @@ views.shell = async v => {
     ${card('Unenforced shell acknowledgement', H`${sb.active ? H`<div class="alert ok"><span>The OS sandbox (${sb.backend}) is active; no acknowledgement is needed.</span></div>` :
       al('critical', 'No OS sandbox is active.', H`Acknowledging lets restricted profiles run shell commands <b>without confinement</b>: they can touch anything the service user can. Prefer bubblewrap or Landlock.`)}
       <label class="check"><input type="checkbox" data-change="ack"${chk(ack)}> <span>I understand shell commands may run without OS confinement on this machine<small>Writes <code>sandbox.acknowledge_unenforced</code></small></span></label>`, { cls: 'c6', id: 'ack' })}
-    ${card('Pending approvals', approvalsTable(arr(appr, 'approvals')))}</div>`);
+    ${card('Pending approvals', H`<p class="small muted">Review the complete command before deciding. An approval binds the exact command, working directory, target and caller.</p>${approvalsTable(arr(appr, 'approvals'))}`, { cls: 'c12', actions: H`<button class="sm" data-act="appr-reload">Refresh</button>` })}
+    ${card('Approval history', H`<div id="appr-history" aria-live="polite"><div class="empty">Loading history…</div></div>`, 'c12')}</div>`);
+  loadApprHistory();
 };
 A['set-profile'] = async t => {
   if (!await confirmDo('Switch profile?', H`<p>Switch this machine to <b>${t.dataset.title}</b>? It applies to new MCP calls immediately.</p>`, 'Switch profile', false)) return;

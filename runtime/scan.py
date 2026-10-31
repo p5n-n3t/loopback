@@ -167,7 +167,8 @@ class TailscaleProvider:
             return {"state": "stopped", "backend_state": backend, "remedy": "Run 'tailscale up' to reconnect."}, data
         tailnet = (data.get("CurrentTailnet") or {}).get("Name") or data.get("MagicDNSSuffix")
         return {"state": "running", "backend_state": backend, "account": tailnet, "version": data.get("Version"),
-                "self": (data.get("Self") or {}).get("HostName")}, data
+                "self": (data.get("Self") or {}).get("HostName"),
+                "limitation": "Only devices visible to this account under its ACL appear. Visibility grants no command access."}, data
 
     def detect(self, env: ScanEnv) -> dict[str, Any]:
         info, self._status = self._load(env)
@@ -1039,10 +1040,18 @@ class StagedScanner:
             plan["status"] = "applying"
             self._save()
         results = []
+        failed_hosts: set[str] = set()
         for i, step in enumerate(plan["steps"]):
             if step.get("done"):
                 results.append({"step": i, "outcome": "already_done"})
                 continue
+            if step["host_id"] in failed_hosts:
+                # An earlier step for this host failed in this run: do not run dependent steps (for example
+                # install_worker without a registered target). A later apply retries it.
+                step["skipped_reason"] = "an earlier step for this host failed"
+                results.append({"step": i, "outcome": "skipped", "reason": step["skipped_reason"]})
+                continue
+            step.pop("skipped_reason", None)
             lock = self._host_locks.setdefault(step["host_id"], threading.Lock())
             with lock:
                 try:
@@ -1060,9 +1069,7 @@ class StagedScanner:
                 except Exception as exc:  # noqa: BLE001 - recorded per step; later steps for this host are skipped
                     step["error"] = str(exc)[:300]
                     results.append({"step": i, "outcome": "failed", "error": step["error"]})
-                    for later in plan["steps"][i + 1:]:
-                        if later["host_id"] == step["host_id"]:
-                            later.setdefault("skipped_reason", "an earlier step for this host failed")
+                    failed_hosts.add(step["host_id"])
             with self._lock:
                 self._save()
         with self._lock:
