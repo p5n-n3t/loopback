@@ -91,7 +91,7 @@ def www_authenticate(ctx: AppContext, request: Request, *, error: str | None = N
 
 
 def unauthorized(ctx: AppContext, request: Request, *, error: str | None = None, description: str | None = None,
-                 scope: str = "loopback:read") -> JSONResponse:
+                 scope: str | None = None) -> JSONResponse:
     return JSONResponse({"error": error or "invalid_token", "error_description": description or "authentication required"},
                         status_code=401, headers={"WWW-Authenticate": www_authenticate(ctx, request, error=error, scope=scope, description=description), **NO_STORE})
 

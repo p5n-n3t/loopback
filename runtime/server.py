@@ -413,6 +413,9 @@ def policy_status() -> dict[str, Any]:
 def permissions(target: str = "local") -> dict[str, Any]:
     """Explain what is permitted on a target ('local' or a remote target name): roots, modes, shell, approvals, enforcement."""
     perms = POLICY.effective_permissions(target)
+    principal = CURRENT_PRINCIPAL.get()
+    if principal:
+        perms["authentication"] = {"kind": principal.kind, "scopes": sorted(principal.scopes)}
     if target in {"local", ""}:
         perms["sandbox"] = CTX.sandbox.status()
     return perms
@@ -909,7 +912,13 @@ _unfiltered_list_tools = mcp.list_tools
 
 async def _policy_filtered_list_tools():
     """Disabled tools are hidden from tools/list, not only refused at tools/call."""
-    return [t for t in await _unfiltered_list_tools() if tool_enabled(t.name)]
+    tools = []
+    for tool in await _unfiltered_list_tools():
+        if tool_enabled(tool.name):
+            required = TOOL_META.get(tool.name, {}).get("scope", "loopback:exec")
+            schemes = [{"type": "oauth2", "scopes": [required]}]
+            tools.append(tool.model_copy(update={"meta": {**(tool.meta or {}), "securitySchemes": schemes}}))
+    return tools
 
 
 mcp.list_tools = _policy_filtered_list_tools  # _handle_list_tools resolves self.list_tools at call time
@@ -1007,9 +1016,19 @@ class McpGate:
                     return await response(scope, receive, send)
                 required = TOOL_META.get(tool, {}).get("scope", "loopback:exec")
                 if principal is not None and not principal.has(required):
-                    AUDIT.record(tool, "insufficient_scope", target=target, principal=principal.display, principal_kind=principal.kind)
+                    AUDIT.record(tool, "insufficient_scope", target=target, principal=principal.display, principal_kind=principal.kind,
+                                 detail={"required_scope": required, "granted_scopes": sorted(principal.scopes)})
                     request = Request(scope)
-                    response = auth_http.forbidden_scope(CTX, request, required, f"tool {tool} requires scope {required}")
+                    description = f"tool {tool} requires scope {required}"
+                    if principal.kind == "oauth":
+                        challenge = auth_http.www_authenticate(CTX, request, error="insufficient_scope",
+                                                               scope=required, description=description)
+                        response = JSONResponse({"jsonrpc": "2.0", "id": payload_id, "result": {
+                            "isError": True, "content": [{"type": "text", "text": description}],
+                            "_meta": {"mcp/www_authenticate": [challenge]},
+                        }}, headers=auth_http.NO_STORE)
+                    else:
+                        response = auth_http.forbidden_scope(CTX, request, required, description)
                     return await response(scope, receive, send)
 
         status_code = 200

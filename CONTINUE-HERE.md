@@ -1,5 +1,17 @@
 # Continue Loopback here
 
+## Scope recovery — 31 October 2026
+
+PR 11 is merged. This branch continues from main `3e71531`.
+The new ChatGPT report records successful reads and a write-triggered reconnect.
+The supplied Claude file repeats the October 29 report, including its original date.
+The candidate removes the read-only discovery hint and publishes each tool's OAuth scope.
+Insufficient OAuth scopes return a tool-level authentication challenge before execution.
+API token denials and machine policy approvals retain their separate behavior.
+`permissions` reports the caller's grant scopes without credentials.
+Read [the investigation](docs/reports/SCOPE-RECOVERY-2026-10-31.md).
+Desktop deployment and an actual ChatGPT browser retry remain required.
+
 ## Reconnect investigation — 29 October 2026
 
 PR 10 is merged. This branch continues from main `38c280b`.

@@ -74,6 +74,17 @@ and prior to the policy-profile and sandbox checks in
 [PERMISSIONS.md](PERMISSIONS.md). Both have to allow a call for it to
 succeed.
 
+`permissions` also returns `authentication.kind` and `authentication.scopes`
+for the current caller. Dashboard tool selection changes machine policy.
+It does not widen an existing OAuth grant. Compare both before changing a profile.
+
+Each MCP tool publishes its required OAuth scope in `_meta.securitySchemes`.
+This is the documented compatibility field for ChatGPT tool authentication.
+The Python MCP SDK retains this field in `tools/list`.
+The initial transport challenge omits a restrictive scope hint.
+Clients can request the scopes in protected-resource metadata and display them for consent.
+Explicit read-only scope requests remain read-only.
+
 ## Discovery
 
 ```
@@ -191,11 +202,28 @@ POST /mcp
 Authorization: Bearer <access token or API token>
 ```
 
-Streamable-HTTP transport, one path for every tool call. A 401 means the
-token is missing/expired/invalid; a 403 means the token is valid but lacks
-a required scope (fix by re-authorizing with a broader scope request) —
-distinct from a policy-layer `approval_required` or hard-deny response,
-which means the token was fine and the *action* was the problem.
+Streamable-HTTP transport uses one path for every tool call.
+A 401 means the token is missing, expired, or invalid.
+An OAuth tool call with insufficient scope returns an MCP error result.
+Its `_meta["mcp/www_authenticate"]` challenge identifies the required scope
+and protected-resource metadata. ChatGPT can use this result to request consent.
+API tokens retain HTTP 403 for insufficient scope. Create a broader API token
+only when its task requires that access.
+
+A policy-layer `approval_required` or hard-deny response means the token
+passes scope checks but the action needs approval or violates machine policy.
+These results do not carry an OAuth challenge. Claude and ChatGPT can also
+require their own tool approvals. Loopback cannot disable those host controls.
+
+After an upgrade, refresh the connection's tool metadata in ChatGPT settings.
+If `permissions` still reports only `loopback:read`, authorize the existing
+connection with the required scopes. The dashboard's tool switches do not
+replace this consent. If ChatGPT's reconnect dialog cannot open authorization,
+remove and recreate that connection with OAuth and CIMD, then test in a new chat.
+Do not choose anonymous authentication for a protected Loopback endpoint.
+
+References: [OpenAI authentication](https://developers.openai.com/plugins/build/auth)
+and [tool metadata](https://developers.openai.com/plugins/reference).
 
 ## Dashboard authentication
 
