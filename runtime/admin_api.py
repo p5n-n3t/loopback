@@ -22,7 +22,7 @@ from auth import AuthError
 from auth_http import NO_STORE, SESSION_COOKIE, client_ip
 from config import validate as validate_config
 from context import AppContext
-from policy import PROFILES, PROFILE_ALIASES, PolicyError
+from policy import PROFILES, PROFILE_ALIASES, PolicyError, StaleDecision
 from sandbox import SandboxManager
 
 
@@ -374,19 +374,37 @@ def routes(ctx: AppContext) -> list[Route]:
     async def approvals_get(request: Request) -> Response:
         return ok(ctx.policy.pending())
 
+    async def approvals_history(request: Request) -> Response:
+        status = request.query_params.get("status") or None
+        if status and status not in {"pending", "approved", "denied", "expired", "consumed"}:
+            return bad_request("status must be pending, approved, denied, expired or consumed")
+        return ok(ctx.policy.approvals_history(status=status, limit=int(request.query_params.get("limit") or 100)))
+
+    def _decider(request: Request) -> str:
+        session = getattr(request.state, "admin_session", None) or {}
+        return str(session.get("username") or "dashboard administrator") if isinstance(session, dict) else "dashboard administrator"
+
     async def approve(request: Request) -> Response:
         body = await read_json(request)
         try:
-            result = ctx.policy.approve(request.path_params["approval_id"], uses=int(body.get("uses", 1)), ttl_seconds=body.get("ttl_seconds"))
+            result = ctx.policy.approve(request.path_params["approval_id"], uses=int(body.get("uses", 1)), ttl_seconds=body.get("ttl_seconds"),
+                                        by=_decider(request), expected_fingerprint=body.get("fingerprint") or None)
         except KeyError:
             return bad_request("approval not found", status=404)
+        except StaleDecision as exc:
+            return bad_request(str(exc), status=409)
         except (TypeError, ValueError):
             return bad_request("uses/ttl_seconds must be integers")
         ctx.audit.record("approval.grant", "ok", target=request.path_params["approval_id"], detail={"uses": result["uses_left"]})
         return ok(result)
 
     async def deny(request: Request) -> Response:
-        removed = ctx.policy.deny(request.path_params["approval_id"])
+        body = await read_json(request)
+        try:
+            removed = ctx.policy.deny(request.path_params["approval_id"], reason=body.get("reason") or None, by=_decider(request),
+                                      expected_fingerprint=body.get("fingerprint") or None)
+        except StaleDecision as exc:
+            return bad_request(str(exc), status=409)
         ctx.audit.record("approval.deny", "ok", target=request.path_params["approval_id"])
         return ok({"removed": removed})
 
@@ -561,6 +579,7 @@ def routes(ctx: AppContext) -> list[Route]:
         Route("/api/admin/permissions/{target}", permissions_delete, methods=["DELETE"]),
         Route("/api/admin/sandbox/self-test", sandbox_self_test, methods=["POST"]),
         Route("/api/admin/approvals", approvals_get, methods=["GET"]),
+        Route("/api/admin/approvals/history", approvals_history, methods=["GET"]),
         Route("/api/admin/approvals/{approval_id}/approve", approve, methods=["POST"]),
         Route("/api/admin/approvals/{approval_id}/deny", deny, methods=["POST"]),
         Route("/api/admin/auth", auth_get, methods=["GET"]),

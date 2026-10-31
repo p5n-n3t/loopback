@@ -463,8 +463,8 @@ def connections() -> dict[str, Any]:
 def execute(command: str, cwd: str | None = None, timeout: int | None = None, approval_id: str | None = None) -> dict[str, Any]:
     """Run one shell command on the local machine with bounded output, inside the OS sandbox when active.
     cwd defaults to the service user's home. Sensitive commands may return approval_required:<id>."""
-    POLICY.check_command(command, approval_id=approval_id)
     workdir = _secure_cwd(cwd)
+    POLICY.check_command(command, approval_id=approval_id, cwd=workdir, principal_key=_owner_key(), principal=_principal_name())
     limit = max(1, min(int(timeout or default_timeout()), 3600))
     started = time.time()
     argv, preexec, env = sandbox_wrap(shell_argv(shell_path(), command), workdir)
@@ -487,8 +487,9 @@ def execute(command: str, cwd: str | None = None, timeout: int | None = None, ap
 @meta("loopback:exec", "execution", approval="policy")
 def job_start(command: str, cwd: str | None = None, approval_id: str | None = None) -> dict[str, Any]:
     """Start a long-running local command in its own process group and return a job id; read output with job_output."""
-    POLICY.check_command(command, approval_id=approval_id)
-    return JOBS.start(command, _secure_cwd(cwd), principal=_principal_name(), owner=_owner_key())
+    workdir = _secure_cwd(cwd)
+    POLICY.check_command(command, approval_id=approval_id, cwd=workdir, principal_key=_owner_key(), principal=_principal_name())
+    return JOBS.start(command, workdir, principal=_principal_name(), owner=_owner_key())
 
 
 @mcp.tool(title="List background jobs", annotations=READ)
@@ -535,7 +536,9 @@ def terminal_start(cwd: str | None = None, rows: int = 30, cols: int = 120) -> d
 def terminal_write(terminal_id: str, data: str, approval_id: str | None = None) -> dict[str, Any]:
     """Send keystrokes/text to a persistent terminal. Text input is checked against the command policy."""
     if data.strip():
-        POLICY.check_command(data, approval_id=approval_id)
+        cwd = TERMINALS.info(terminal_id, owner=_owner_key())["cwd"]
+        POLICY.check_command(data, approval_id=approval_id, cwd=f"terminal:{terminal_id}:{cwd}",
+                             principal_key=_owner_key(), principal=_principal_name())
     return TERMINALS.write(terminal_id, data, owner=_owner_key())
 
 
