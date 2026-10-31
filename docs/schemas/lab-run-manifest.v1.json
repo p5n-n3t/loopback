@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopback.invalid/schemas/lab-run-manifest.v1.json",
+  "title": "Loopback lab run manifest v1",
+  "description": "Structural contract for runtime/lab.py validate_manifest. Additional rule not expressible here (secret guard): no string value anywhere in the manifest may look like a credential (tested with redaction.redact_text). Credentials appear only as references such as 'secretref:NAME', never as values. Check output is already redacted and at most 4096 characters.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "source_commit", "image_digest", "platform", "install", "providers",
+               "policy_profile", "checks", "owned_resource_refs", "cleanup"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "run_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"},
+    "source_commit": {"type": "string", "minLength": 1},
+    "image_digest": {"type": ["string", "null"]},
+    "platform": {
+      "type": "object", "additionalProperties": true, "required": ["os", "arch"],
+      "properties": {"os": {"type": "string", "minLength": 1}, "arch": {"type": "string", "minLength": 1}}
+    },
+    "install": {
+      "type": "object", "additionalProperties": true, "required": ["input_mode", "distribution"],
+      "properties": {
+        "input_mode": {"enum": ["interactive", "settings"]},
+        "distribution": {"enum": ["checkout", "release", "npm", "powershell"]}
+      }
+    },
+    "providers": {
+      "type": "object", "additionalProperties": true, "required": ["private", "primary_ingress"],
+      "properties": {
+        "private": {"enum": ["none", "lan", "tailscale", "mesh"]},
+        "primary_ingress": {"enum": ["local", "tailscale-serve", "tailscale-funnel", "cloudflare", "ngrok"]}
+      }
+    },
+    "policy_profile": {"type": "string", "minLength": 1},
+    "checks": {"type": "array", "items": {"$ref": "#/$defs/check"}},
+    "owned_resource_refs": {"type": "array", "items": {"type": "string"}},
+    "cleanup": {
+      "type": "object", "additionalProperties": true, "required": ["status", "residual_refs"],
+      "properties": {
+        "status": {"enum": ["pending", "running", "clean", "residual", "interrupted"]},
+        "residual_refs": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "outcome", "evidence"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z0-9][a-z0-9_-]*)*$"},
+        "outcome": {"enum": ["PASS", "EXPECTED DENIAL", "FAIL", "BLOCKED", "UNAVAILABLE", "NOT TESTED", "UNVERIFIED"]},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "duration_ms": {"type": ["integer", "null"], "minimum": 0},
+        "exit_status": {"type": ["integer", "null"]},
+        "output": {"type": "string", "maxLength": 4096}
+      }
+    }
+  }
+}
