@@ -1,7 +1,7 @@
 <p align="center"><img src="https://lightsprint-image-uploads.s3.us-east-1.amazonaws.com/uploads/images/2026-10-24/kGRaI0JCrKrjv8NSFfcjZ.png" width="288" alt="Loopback"></p>
 
 <p align="center">
-  <img src="assets/loopback-logo.png" alt="Loopback" width="500">
+  <img src="loopback-logo.png" alt="Loopback" width="500">
 </p>
 
 [![M8ven Score](https://m8ven.ai/badge/mcp/p5n-n3t-loopback-1cyblg)](https://m8ven.ai/mcp/p5n-n3t-loopback-1cyblg?s=readme)
