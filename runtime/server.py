@@ -51,10 +51,12 @@ from documents import DocumentTools
 from jobs import QuotaExceeded, shell_argv
 from policy import ApprovalRequired, PolicyError
 from redaction import redact_text
+from url_policy import UrlPolicyError
+from url_policy import from_policy as url_policy_from
 from version import VERSION
 
 CTX = build_context()
-CTX.browser = BrowserAdapter()
+CTX.browser = BrowserAdapter(url_policy=lambda: url_policy_from(POLICY.data))
 CTX.documents = DocumentTools()
 CTX.desktop = DesktopAdapter()
 POLICY = CTX.policy
@@ -165,6 +167,8 @@ def _translate(exc: BaseException) -> ToolError:
     """
     if isinstance(exc, ApprovalRequired):
         return ToolError(str(exc))
+    if isinstance(exc, UrlPolicyError):
+        return ToolError(f"url_denied: {exc}")
     if isinstance(exc, QuotaExceeded):
         return ToolError(f"quota_exceeded: {exc}")
     if isinstance(exc, PolicyError):
@@ -774,9 +778,11 @@ def browser_status() -> dict[str, Any]:
 @mcp.tool(title="Open browser URL", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True))
 @meta("loopback:exec", "browser", network=True)
 def browser_open(url: str, session: str = "loopback") -> dict[str, Any]:
-    """Open an HTTPS URL in the optional browser automation session (opt-in capability)."""
+    """Open a public HTTPS URL (or http://localhost) in your own browser automation session (opt-in capability).
+
+    Private, metadata, credential-bearing and ambiguous URLs are rejected; redirects are re-checked."""
     POLICY.check_browser()
-    return CTX.browser.open(url, session)
+    return CTX.browser.open(url, session, owner=_owner_key())
 
 
 @mcp.tool(title="Inspect browser page", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=False, open_world_hint=True))
@@ -784,7 +790,7 @@ def browser_open(url: str, session: str = "loopback") -> dict[str, Any]:
 def browser_snapshot(session: str = "loopback", interactive_only: bool = True) -> dict[str, Any]:
     """Accessibility snapshot with element references from the optional browser session."""
     POLICY.check_browser()
-    return CTX.browser.snapshot(session, interactive_only)
+    return CTX.browser.snapshot(session, interactive_only, owner=_owner_key())
 
 
 @mcp.tool(title="Click browser element", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True))
@@ -792,7 +798,7 @@ def browser_snapshot(session: str = "loopback", interactive_only: bool = True) -
 def browser_click(ref: str, session: str = "loopback") -> dict[str, Any]:
     """Click one element reference returned by browser_snapshot."""
     POLICY.check_browser()
-    return CTX.browser.click(ref, session)
+    return CTX.browser.click(ref, session, owner=_owner_key())
 
 
 @mcp.tool(title="Fill browser field", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True))
@@ -800,7 +806,7 @@ def browser_click(ref: str, session: str = "loopback") -> dict[str, Any]:
 def browser_fill(ref: str, text: str, session: str = "loopback") -> dict[str, Any]:
     """Fill one browser field reference with text."""
     POLICY.check_browser()
-    return CTX.browser.fill(ref, text, session)
+    return CTX.browser.fill(ref, text, session, owner=_owner_key())
 
 
 @mcp.tool(title="Get browser URL", annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True))
@@ -808,7 +814,7 @@ def browser_fill(ref: str, text: str, session: str = "loopback") -> dict[str, An
 def browser_get_url(session: str = "loopback") -> dict[str, Any]:
     """Current URL of a browser automation session."""
     POLICY.check_browser()
-    return CTX.browser.url(session)
+    return CTX.browser.url(session, owner=_owner_key())
 
 
 @mcp.tool(title="Close browser session", annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True))
@@ -816,7 +822,7 @@ def browser_get_url(session: str = "loopback") -> dict[str, Any]:
 def browser_close(session: str = "loopback") -> dict[str, Any]:
     """Close an optional browser automation session."""
     POLICY.check_browser()
-    return CTX.browser.close(session)
+    return CTX.browser.close(session, owner=_owner_key())
 
 
 # ---------------------------------------------------------------- desktop
@@ -838,15 +844,17 @@ def desktop_windows(limit: int = 200) -> dict[str, Any]:
 @mcp.tool(title="Capture desktop screenshot", annotations=READ_NONIDEMPOTENT)
 @meta("loopback:exec", "desktop")
 def desktop_screenshot(output_path: str | None = None) -> Image:
-    """Capture the desktop and return it as MCP image content."""
+    """Capture the desktop and return it as MCP image content. Nothing is saved unless output_path is given."""
     POLICY.check_desktop()
     if output_path:
         dst = POLICY.check_path(output_path, write=True)
-    else:
-        target_dir = Path(CTX.identity.home) / ".loopback-screenshots"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        dst = POLICY.check_path(target_dir / f"desktop-{int(time.time())}.png", write=True)
-    return Image(path=CTX.desktop.screenshot(dst))
+        return Image(path=CTX.desktop.screenshot(dst))
+    # Without an explicit output path, screen pixels are not persisted (H22): the capture
+    # lives in a private temporary directory only long enough to return it.
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="loopback-shot-") as tmp:
+        data = CTX.desktop.screenshot(Path(tmp) / "desktop.png").read_bytes()
+    return Image(data=data, format="png")
 
 
 @mcp.tool(title="Activate desktop window", annotations=CREATE)
