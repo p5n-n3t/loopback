@@ -2,10 +2,16 @@
 from __future__ import annotations
 
 import json
+import re
+import tempfile
 import unittest
+import sys
+import shlex
+from pathlib import Path
+from unittest.mock import patch
 
 import test_auth_flows as auth_tests
-from helpers import rpc
+from helpers import call_tool, pkce_pair, rpc, tool_data, tool_text
 
 
 class ReconnectContractTests(unittest.TestCase):
@@ -16,6 +22,91 @@ class ReconnectContractTests(unittest.TestCase):
     code_from = auth_tests.OAuthFlowTests.code_from
     exchange = auth_tests.OAuthFlowTests.exchange
     grant = auth_tests.OAuthFlowTests.grant
+
+    def test_catalog_declares_the_scope_that_each_tool_enforces(self):
+        _, tokens = self.grant(scope="loopback:read")
+        headers = {"Authorization": "Bearer " + tokens["access_token"]}
+        tools = rpc(self.c, headers, "tools/list").json()["result"]["tools"]
+        for tool in tools:
+            with self.subTest(tool=tool["name"]):
+                self.assertEqual(tool["_meta"]["securitySchemes"], [{"type": "oauth2", "scopes": [
+                    self.server.TOOL_META[tool["name"]]["scope"]]}])
+        self.assertTrue(next(t for t in tools if t["name"] == "execute")["annotations"]["destructiveHint"])
+
+    def test_discovery_does_not_force_a_read_only_grant(self):
+        response = rpc(self.c, {}, "tools/list")
+        challenge = response.headers["www-authenticate"]
+        self.assertNotIn('scope="loopback:read"', challenge)
+        advertised = re.search(r' scope="([^"]+)"', challenge)
+        scopes = advertised[1] if advertised else " ".join(
+            self.c.get("/.well-known/oauth-protected-resource/mcp").json()["scopes_supported"])
+        _, tokens = self.grant(scope=scopes)
+        self.assertEqual(set(tokens["scope"].split()), {"loopback:read", "loopback:write", "loopback:exec", "loopback:fleet"})
+        self.assertNotIn("loopback:admin", tokens["scope"])
+
+    def test_write_scope_challenge_and_reconsent_preserve_existing_grant(self):
+        reg, tokens = self.grant(scope="loopback:read")
+        headers = {"Authorization": "Bearer " + tokens["access_token"]}
+        with tempfile.TemporaryDirectory() as directory, patch.dict(self.server.POLICY.data, {
+            "allowed_roots": [{"path": directory, "mode": "rw"}], "denied_roots": []
+        }):
+            path = Path(directory) / "mathutil.py"
+            arguments = {"path": str(path), "content": "def double(n):\n    return n * 2\n"}
+            response = call_tool(self.c, headers, "write_file", arguments)
+            self.assertEqual(response.status_code, 200, response.text)
+            result = response.json()["result"]
+            self.assertTrue(result["isError"])
+            challenge = result["_meta"]["mcp/www_authenticate"][0]
+            for expected in ('error="insufficient_scope"', 'scope="loopback:write"', 'resource_metadata=', 'error_description='):
+                self.assertIn(expected, challenge)
+            self.assertFalse(path.exists())
+            verifier, code_challenge = pkce_pair()
+            scope = tokens["scope"] + " " + re.search(r'scope="([^"]+)"', challenge)[1]
+            code = self.code_from(self.authorize(reg["client_id"], code_challenge, scope=scope))
+            upgraded = self.exchange(reg["client_id"], code, verifier).json()
+            write_headers = {"Authorization": "Bearer " + upgraded["access_token"]}
+            written = call_tool(self.c, write_headers, "write_file", arguments)
+            self.assertFalse(written.json()["result"].get("isError", False), written.text)
+            self.assertEqual(path.read_text(), arguments["content"])
+            self.assertIn("def double", tool_text(call_tool(self.c, write_headers, "read_file", {"path": str(path)})))
+            perms = tool_data(call_tool(self.c, headers, "permissions"))
+            self.assertEqual(perms["authentication"], {"kind": "oauth", "scopes": ["loopback:read"]})
+            self.assertTrue(call_tool(self.c, headers, "write_file", arguments).json()["result"]["isError"])
+
+    def test_policy_approval_is_not_an_oauth_challenge(self):
+        _, tokens = self.grant(scope="loopback:read loopback:exec")
+        headers = {"Authorization": "Bearer " + tokens["access_token"]}
+        with patch.dict(self.server.POLICY.data, {"profile": "custom", "allow_shell": True,
+                                                 "sandbox_required": False, "require_approval_patterns": ["approval-marker"]}):
+            response = call_tool(self.c, headers, "execute", {"command": "echo approval-marker"})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["result"]["isError"])
+            self.assertIn("approval_required:", tool_text(response))
+            self.assertNotIn("mcp/www_authenticate", json.dumps(response.json()))
+
+    def test_coding_access_survives_refresh_and_policy_selection(self):
+        reg, tokens = self.grant(scope="loopback:read loopback:write loopback:exec loopback:fleet")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(self.server.POLICY.data, {
+            "profile": "custom", "allow_shell": True, "sandbox_required": False,
+            "allowed_roots": [{"path": directory, "mode": "rw"}], "denied_roots": [],
+            "allowed_tools": list(self.server.TOOL_META), "denied_tools": [],
+        }):
+            path = str(Path(directory) / "mathutil.py")
+            headers = {"Authorization": "Bearer " + tokens["access_token"]}
+            written = call_tool(self.c, headers, "write_file", {"path": path, "content": "def double(n):\n    return n * 2\n"})
+            self.assertFalse(written.json()["result"].get("isError", False), written.text)
+            form = {"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"],
+                    "client_id": reg["client_id"], "resource": auth_tests.RESOURCE}
+            response = self.c.post("/oauth/token", data=form)
+            self.assertEqual(response.status_code, 200, response.text)
+            refreshed = response.json()
+            self.assertEqual(refreshed["scope"], tokens["scope"])
+            headers = {"Authorization": "Bearer " + refreshed["access_token"]}
+            self.assertIn("def double", tool_text(call_tool(self.c, headers, "read_file", {"path": path})))
+            command = shlex.quote(sys.executable) + ' -c "from mathutil import double; assert double(4) == 8; print(8)"'
+            result = tool_data(call_tool(self.c, headers, "execute", {"command": command, "cwd": directory}))
+            self.assertEqual(result.get("returncode"), 0, result)
+            self.assertEqual(result["stdout"].strip(), "8")
 
     def test_invalid_credentials_have_an_explicit_bearer_error(self):
         missing = rpc(self.c, {}, "tools/list")

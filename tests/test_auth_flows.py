@@ -189,9 +189,11 @@ class OAuthFlowTests(unittest.TestCase):
         headers = {"Authorization": "Bearer " + tok["access_token"]}
         self.assertEqual(call_tool(self.c, headers, "list_dir", {"path": "~"}).status_code, 200)
         r = call_tool(self.c, headers, "execute", {"command": "true"})
-        self.assertEqual(r.status_code, 403)
-        self.assertIn('error="insufficient_scope"', r.headers["www-authenticate"])
-        self.assertIn('scope="loopback:exec"', r.headers["www-authenticate"])
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["result"]["isError"])
+        challenge = r.json()["result"]["_meta"]["mcp/www_authenticate"][0]
+        self.assertIn('error="insufficient_scope"', challenge)
+        self.assertIn('scope="loopback:exec"', challenge)
 
     def test_legacy_machine_token_rejected_on_fresh_install(self):
         r = rpc(self.c, {"Authorization": "Bearer " + self.machine_token}, "tools/list")
