@@ -1,5 +1,19 @@
 # Continue Loopback here
 
+## Fresh connection acceptance — 31 October 2026
+
+PR 12 is merged. The owner confirms the updated runtime works through Claude.
+Claude passes all eight coding, terminal, job, HTTPS, and ora8 checks without prompts.
+ChatGPT's original connection still reports only `loopback:read` after the upgrade.
+The owner confirms they retained that connection rather than completing fresh authorization.
+A fresh `Loopback Coding` connection shows all four scopes on the consent page.
+After consent, ChatGPT reports all four scopes and passes directory creation, file write, readback, and Python execution.
+No further runtime change is necessary for this recovery.
+Use the new connection. The old in-chat reconnect dialog remains unverified and is not the successful recovery path.
+Read [the acceptance record](docs/reports/FRESH-CONNECTION-ACCEPTANCE-2026-10-31.md) and [the new failure report](docs/reports/CHATGPT-WRITING-BLOCK-2026-10-31.md).
+ChatGPT's full eight-step suite, repeated conversations, and timed token refresh remain acceptance checks.
+The sections below retain the earlier investigation state.
+
 ## Scope recovery — 31 October 2026
 
 PR 11 is merged. This branch continues from main `3e71531`.
