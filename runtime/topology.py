@@ -666,7 +666,7 @@ class TopologyBuilder:
                               "detail": {"provider": r.get("provider"), "mode": r.get("mode"), "exposure": r.get("exposure"),
                                          "hostname": r.get("hostname"), "path": r.get("path"), "target": r.get("target"),
                                          "owner": r.get("owner"), "owned_by": r.get("owned_by"), "kind": r.get("kind"),
-                                         "host": target, "note": r.get("note") or "Discovered route; Loopback does not manage it",
+                                         "backend": r.get("backend"), "host": target, "note": r.get("note") or "Discovered route; Loopback does not manage it",
                                          "observed_at": host.get("observed_at")}})
                 edges.append({"id": f"clients->{rid}", "from": "clients", "to": rid, "transport": r.get("provider"), "protocol": "https",
                               "exposure": r.get("exposure"), "initiator": "clients", "direct": False, "proxied": True, "status": status,
@@ -674,6 +674,31 @@ class TopologyBuilder:
                 edges.append({"id": f"{rid}->{host_node}", "from": rid, "to": host_node, "transport": r.get("provider"), "protocol": "http",
                               "exposure": "local", "initiator": rid, "direct": True, "proxied": False, "status": status,
                               "detail": {"target": r.get("target"), "note": "Handler target on the host"}})
+
+        # Provider observations have no inferred physical-host association.
+        catalog = inventory.get("cloudflare_catalog") or {}
+        for tunnel in catalog.get("tunnels") or []:
+            for index, route in enumerate(tunnel.get("ingress") or []):
+                rid = f"provider:cloudflare:{tunnel['id']}:{index}"
+                status = "stale" if catalog.get("stale") else "untested"
+                nodes.append({"id": rid, "type": "tunnel", "kind": "unknown",
+                              "label": route["hostname"][:60], "group": "cloudflare-provider", "status": status,
+                              "ownership": "external", "detail": {"provider": "cloudflare", "hostname": route["hostname"],
+                              "target": route["service"], "path": route.get("path"), "tunnel_id": tunnel["id"],
+                              "tunnel_status": tunnel.get("status"), "source": catalog.get("source"),
+                              "observed_at": catalog.get("observed_at"), "host_association": tunnel.get("host_association", "unknown"),
+                              "host": tunnel.get("host"), "host_evidence": tunnel.get("host_evidence"),
+                              "host_candidates": tunnel.get("host_candidates", []),
+                              "note": "Provider configuration; physical host and MCP readiness are unverified."}})
+                matched_host = tunnel.get("host")
+                host_node = "gateway" if matched_host == "local" else f"ssh:{matched_host}"
+                if tunnel.get("host_association") == "matched" and host_node in known_hosts:
+                    edges.append({"id": f"{rid}->{host_node}", "from": rid, "to": host_node,
+                                  "transport": "cloudflare", "protocol": "tunnel", "exposure": "local",
+                                  "status": status, "detail": {"evidence": tunnel.get("host_evidence")}})
+                edges.append({"id": f"clients->{rid}", "from": "clients", "to": rid, "transport": "cloudflare",
+                              "protocol": "https", "exposure": "public", "status": status, "direct": False,
+                              "proxied": True, "initiator": "clients"})
 
         return {
             "generated_at": time.time(),

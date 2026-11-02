@@ -103,7 +103,10 @@ class ReconnectContractTests(unittest.TestCase):
             self.assertEqual(refreshed["scope"], tokens["scope"])
             headers = {"Authorization": "Bearer " + refreshed["access_token"]}
             self.assertIn("def double", tool_text(call_tool(self.c, headers, "read_file", {"path": path})))
-            command = shlex.quote(sys.executable) + ' -c "from mathutil import double; assert double(4) == 8; print(8)"'
+            # The running interpreter may live inside Loopback's protected state
+            # directory. Use a system interpreter for the caller's coding task.
+            interpreter = next((p for p in ("/usr/bin/python3", "/usr/local/bin/python3") if Path(p).is_file()), sys.executable)
+            command = shlex.quote(interpreter) + ' -c "from mathutil import double; assert double(4) == 8; print(8)"'
             result = tool_data(call_tool(self.c, headers, "execute", {"command": command, "cwd": directory}))
             self.assertEqual(result.get("returncode"), 0, result)
             self.assertEqual(result["stdout"].strip(), "8")

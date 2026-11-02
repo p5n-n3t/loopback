@@ -398,6 +398,8 @@ def tailscale_routes(data):
                                'path': path, 'target': h.get('Proxy') or h.get('Path') or h.get('Text') and 'text' or None,
                                'foreground': foreground})
         for host_port, tcp in (cfg.get('TCP') or {}).items():
+            if not (tcp or {}).get('TCPForward'):
+                continue  # HTTPS termination metadata is not a forwarding route.
             routes.append({'provider': 'tailscale', 'mode': 'funnel' if allow.get(host_port) else 'serve', 'host_port': str(host_port),
                            'path': None, 'target': 'tcp:' + str((tcp or {}).get('TCPForward') or ''), 'foreground': foreground, 'tcp': True})
     return routes
@@ -422,7 +424,8 @@ def cloudflared_processes():
                 config = safe[i + 1]
             elif a.startswith('--config='):
                 config = a.split('=', 1)[1]
-        entry = {'pid': int(proc.name), 'args': ' '.join(safe)[:300], 'config_file': config, 'ingress': []}
+        tunnel_id = next((a.lower() for a in safe if re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', a)), None)
+        entry = {'pid': int(proc.name), 'args': ' '.join(safe)[:300], 'config_file': config, 'ingress': [], 'tunnel_id': tunnel_id}
         if config:
             try:
                 for line in Path(os.path.expanduser(config)).read_text().splitlines()[:200]:
@@ -430,16 +433,120 @@ def cloudflared_processes():
                     key = key.strip('- ').strip()
                     if key in ('hostname', 'service', 'tunnel') and value.strip():
                         entry['ingress'].append({key: value.strip()[:200]})
+                        if key == 'tunnel' and re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', value.strip()):
+                            entry['tunnel_id'] = value.strip().lower()
             except OSError:
                 entry['config_readable'] = False
         procs.append(entry)
     return procs
 
 
+def declared_mcp_endpoints():
+    """Read only known client configuration locations; return transport metadata, never credentials."""
+    candidates = []
+    home = Path.home()
+    locations = [(home / '.cursor/mcp.json', 'json'),
+                 (home / '.config/Claude/claude_desktop_config.json', 'json'),
+                 (home / '.codex/config.toml', 'toml')]
+    for path, kind in locations:
+        try:
+            if path.stat().st_size > 2 * 1024 * 1024:
+                continue
+            if kind == 'toml':
+                import tomllib
+                data = tomllib.loads(path.read_text())
+            else:
+                data = json.loads(path.read_text())
+            servers = data.get('mcpServers') or data.get('mcp_servers') or {}
+            for name, server in list(servers.items())[:200]:
+                if not isinstance(server, dict):
+                    continue
+                raw = server.get('url')
+                if isinstance(raw, str):
+                    parsed = urlsplit(raw)
+                    if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
+                        continue
+                    port = parsed.port
+                    host = '[' + parsed.hostname + ']' if ':' in parsed.hostname else parsed.hostname
+                    url = parsed.scheme + '://' + host + (':' + str(port) if port else '') + (parsed.path or '/')
+                    candidates.append({'name': str(name)[:100], 'url': url, 'transport': 'http',
+                                       'source': path.name, 'state': 'declared', 'authentication': 'unknown'})
+                elif server.get('command'):
+                    candidates.append({'name': str(name)[:100], 'url': None, 'transport': 'stdio',
+                                       'source': path.name, 'state': 'declared', 'verification': 'requires-approved-execution'})
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+    return candidates
+
+
+def verify_mcp_candidate(root, url):
+    """Selected known declarations only; no redirects, credential discovery or stdio execution."""
+    import httpx
+    import ipaddress
+    known = {x['url'] for x in declared_mcp_endpoints() if x.get('url')}
+    if url not in known:
+        raise ValueError('Select a currently declared HTTP MCP endpoint')
+    parsed = urlsplit(url)
+    if parsed.query or parsed.fragment or parsed.username or parsed.password:
+        raise ValueError('Endpoint must not contain credentials or query parameters')
+    for item in socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80), type=socket.SOCK_STREAM):
+        address = ipaddress.ip_address(item[4][0])
+        address = getattr(address, 'ipv4_mapped', None) or address
+        if address.is_link_local or address.is_unspecified or address.is_multicast or str(address) in {'169.254.169.254', '100.100.100.200'}:
+            raise ValueError('Metadata/link-local endpoint denied')
+    result = {'url': url, 'observed_at': time.time(), 'state': 'unverified'}
+    try:
+        with httpx.Client(timeout=8, follow_redirects=False, trust_env=False) as client:
+            request = client.build_request('POST', url, headers={'Accept': 'application/json, text/event-stream'}, json={
+                'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {
+                    'protocolVersion': '2025-06-18', 'capabilities': {},
+                    'clientInfo': {'name': 'loopback-selected-discovery', 'version': '1'}}})
+            response = client.send(request, stream=True)
+            content = bytearray()
+            started = time.monotonic()
+            try:
+                for chunk in response.iter_bytes():
+                    if len(content) + len(chunk) > 1024 * 1024 or time.monotonic() - started > 8:
+                        break
+                    content.extend(chunk)
+                    if 'text/event-stream' in response.headers.get('content-type', '') and b'\n\n' in content:
+                        break
+            finally:
+                response.close()
+            text = content.decode('utf-8', 'replace')
+            result['http_status'] = response.status_code
+            if response.status_code == 401:
+                result['state'] = 'auth_required'
+            elif response.status_code == 403:
+                result['state'] = 'access_denied'
+            elif 300 <= response.status_code < 400:
+                result['state'] = 'redirect_requires_review'
+            elif len(content) <= 1024 * 1024:
+                bodies = [text] if 'text/event-stream' not in response.headers.get('content-type', '') else [line[5:].strip() for line in text.splitlines() if line.startswith('data:')]
+                for body in bodies:
+                    try:
+                        message = json.loads(body)
+                    except ValueError:
+                        continue
+                    data = message.get('result') if isinstance(message, dict) else None
+                    if response.status_code == 200 and message.get('id') == 1 and isinstance(data, dict) and isinstance(data.get('protocolVersion'), str) and isinstance(data.get('capabilities'), dict):
+                        result.update(state='mcp_verified', protocol_version=data['protocolVersion'][:40],
+                                      server_name=str((data.get('serverInfo') or {}).get('name') or '')[:100])
+                        break
+    except (httpx.HTTPError, OSError):
+        result['state'] = 'unavailable'
+    path = root / 'discovery-verifications.json'
+    previous = read_json(path, {})
+    previous[url] = result
+    write_json(path, dict(list(previous.items())[-200:]))
+    return result
+
+
 def discover(root):
     """Read-only host inventory: nothing here starts, stops or rewrites anything."""
     out = {'observed_at': time.time(), 'hostname': socket.gethostname(), 'tailscale': {'status': 'ok', 'routes': [], 'dns_name': None},
-           'cloudflared': {'status': 'ok', 'processes': []}, 'listeners': {'status': 'ok', 'items': []}, 'bindings': []}
+           'cloudflared': {'status': 'ok', 'processes': []}, 'listeners': {'status': 'ok', 'items': []}, 'bindings': [],
+           'mcp_endpoints': [], 'mcp_verifications': {}}
     try:
         out['tailscale']['routes'] = tailscale_routes(serve_config())
         status = json.loads(run(['tailscale', 'status', '--json']))
@@ -472,6 +579,8 @@ def dispatch(root, payload):
         return metrics(root, payload.get('controller_pid'))
     if action == 'discover':
         return discover(root)
+    if action == 'discover_verify':
+        return verify_mcp_candidate(root, str(payload.get('url') or ''))
     b = payload.get('binding', {})
     validate(b)
     directory = root / 'bindings' / b['name']

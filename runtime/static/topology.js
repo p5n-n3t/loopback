@@ -8,7 +8,7 @@
 (function () {
 const LAYER = { 'external-client': 0, tunnel: 1, network: 1, gateway: 2, 'mcp-service': 4 };
 const LAYER_NAME = ['Clients', 'Ingress', 'Gateway', 'Machines', 'Services'];
-const NW = 188, NH = 66, GW = 220, GH = 78, HG = 34, VG = 118, GROUP_GAP = 64, LM = 96, TM = 30;
+const NW = 250, NH = 78, GW = 270, GH = 90, HG = 34, VG = 118, LM = 96, TM = 30;
 const TRANSPORT = { ssh: 'SSH', https: 'HTTPS', http: 'HTTP', mcp: 'MCP', 'cloudflare-tunnel': 'Cloudflare Tunnel', tailscale: 'Tailscale', 'tailscale-serve': 'Tailscale', 'tailscale-funnel': 'Tailscale Funnel' };
 const BAD = new Set(['unreachable', 'auth_failed', 'error']);
 const T = { data: null, lay: null, sel: null, filter: 'all', legend: false, vb: null, refreshedAt: null, svg: null };
@@ -44,18 +44,33 @@ function layout(data) {
   gnames.forEach(g => groups.get(g).sort((a, b) => String(a.label).localeCompare(String(b.label))));
   const size = n => n.type === 'gateway' ? [GW, GH] : [NW, NH];
   const rowW = r => r.reduce((s, n) => s + size(n)[0], 0) + Math.max(0, r.length - 1) * HG;
-  const w3 = gnames.reduce((s, g) => s + rowW(groups.get(g)), 0) + Math.max(0, gnames.length - 1) * GROUP_GAP;
-  const maxW = Math.max(rowW(rows[0]), rowW(rows[1]), rowW(rows[2]), w3, rowW(rows[4]), NW);
+  // Keep large inventories readable rather than stretching a single row thousands of pixels.
+  const columns = 5;
+  const wrappedW = list => rowW(list.slice(0, columns));
+  const maxW = Math.max(...rows.map(wrappedW), NW);
   const used = [0, 1, 2, 3, 4].filter(i => rows[i].length);
-  const rowY = {}; let y = TM;
-  used.forEach(i => { if (i === 3 && gnames.length) y += 26; rowY[i] = y; y += GH + VG; });
-  const place = (list, x0, ly) => { let x = x0; list.forEach(n => { const [w, h] = size(n); n.w = w; n.h = h; n.x = x; n.y = ly + (GH - h) / 2; x += w + HG; }); };
-  [0, 1, 2, 4].forEach(i => { if (rows[i].length) place(rows[i], LM + (maxW - rowW(rows[i])) / 2, rowY[i]); });
-  const brackets = [];
-  if (rows[3].length) {
-    let x = LM + (maxW - w3) / 2;
-    gnames.forEach(g => { const list = groups.get(g), w = rowW(list); place(list, x, rowY[3]); brackets.push({ name: g, x0: x, x1: x + w, y: rowY[3] }); x += w + GROUP_GAP; });
-  }
+  const rowY = {}, brackets = []; let y = TM;
+  const place = (list, ly) => {
+    for (let at = 0; at < list.length; at += columns) {
+      const chunk = list.slice(at, at + columns);
+      let x = LM + (maxW - rowW(chunk)) / 2;
+      chunk.forEach(n => { const [w, h] = size(n); n.w = w; n.h = h; n.x = x; n.y = ly + (GH - h) / 2; x += w + HG; });
+      ly += GH + 44;
+    }
+    return ly;
+  };
+  used.forEach(i => {
+    rowY[i] = y;
+    if (i === 3) {
+      gnames.forEach(g => {
+        y += 26;
+        const list = groups.get(g), width = wrappedW(list);
+        brackets.push({name: g, x0: LM + (maxW - width) / 2, x1: LM + (maxW + width) / 2, y});
+        y = place(list, y) + 20;
+      });
+    } else y = place(rows[i], y);
+    y += VG - 44;
+  });
   const byId = {}; nodes.forEach(n => { byId[n.id] = n; n.cx = n.x + n.w / 2; n.status = nodeStatus(n, data); });
   // Spread edge anchors so parallel edges do not share one point.
   const ports = {};
@@ -121,7 +136,7 @@ function nodeSvg(n) {
   const dim = T.filter !== 'all' && n.status !== T.filter ? ' dim' : '';
   return H`<g class="tn ${n.type} st-${n.status}${T.sel === 'n:' + n.id ? ' sel' : ''}${dim}" transform="translate(${n.x},${n.y})" data-nid="${n.id}" tabindex="0" role="button"
     aria-label="${(n.display_name || n.label) + ', ' + n.type + ', ' + (LB.STATUS_LABEL[n.status] || n.status)}">${LB.raw(shape(n) + icon(n))}
-    <text class="t1" x="44" y="${ty[0]}">${trunc(n.label, 22)}</text><text class="t2" x="44" y="${ty[1]}">${trunc(l2, 26)}</text>${l3 ? H`<text class="t3" x="44" y="${ty[2]}">${trunc(l3, 28)}</text>` : ''}
+    <text class="t1" x="44" y="${ty[0]}">${trunc(n.label, 25)}</text><text class="t2" x="44" y="${ty[1]}">${trunc(l2, 29)}</text>${l3 ? H`<text class="t3" x="44" y="${ty[2]}">${trunc(l3, 29)}</text>` : ''}
     <circle class="sdot ${n.status}" cx="${n.w - 12}" cy="12" r="5"><title>${LB.STATUS_LABEL[n.status] || n.status}</title></circle>
     ${n.type === 'gateway' ? LB.raw(`<rect class="tag" x="12" y="-9" width="44" height="16" rx="4"/><text class="tagt" x="34" y="3" text-anchor="middle">LOCAL</text>`) : ''}
     ${n.ownership ? H`<g class="own-mark ${n.ownership}" transform="translate(12,-9)"><title>${n.ownership === 'external' ? 'Existing route owned outside Loopback. Shown as configured; never changed.' : n.ownership === 'managed' ? 'Managed by Loopback' : 'Owner unknown'}</title><rect class="tag" width="${n.ownership === 'external' ? 64 : 58}" height="16" rx="4"/><text class="tagt" x="${n.ownership === 'external' ? 32 : 29}" y="12" text-anchor="middle">${n.ownership.toUpperCase()}</text></g>` : ''}
@@ -140,9 +155,9 @@ function edgeSvg(L) {
   const dim = T.filter !== 'all' && s !== T.filter ? ' dim' : '';
   return H`<g class="te st-${s}${proxied ? ' proxied' : ''}${T.sel === 'e:' + e.id ? ' sel' : ''}${dim}" data-eid="${e.id}" tabindex="0" role="button" aria-label="${label + ' from ' + (L.a.label) + ' to ' + (L.b.label) + ', ' + (LB.STATUS_LABEL[s] || s)}">
     <path class="hit" d="${L.d}"/><path class="line" d="${L.d}" ${LB.raw(rev ? `marker-start="${mk}"` : `marker-end="${mk}"`)}/>
-    <g class="lbl"><rect x="${x}" y="${y}" width="${lw}" height="18" rx="9"/><text x="${L.mx}" y="${y + 12.5}" text-anchor="middle">${label}</text>
+    <g class="lbl${T.sel === 'e:' + e.id ? ' selected' : ' hidden'}"><rect x="${x}" y="${y}" width="${lw}" height="18" rx="9"/><text x="${L.mx}" y="${y + 12.5}" text-anchor="middle">${label}</text>
     ${lat ? H`<text class="lat" x="${L.mx}" y="${y + 30}" text-anchor="middle">${lat}</text>` : ''}</g>
-    ${xp ? H`<g class="xb ${xp}"><rect x="${x + lw + 4}" y="${y + 1}" width="${xw}" height="16" rx="8"/><text x="${x + lw + 4 + xw / 2}" y="${y + 12.5}" text-anchor="middle">${xp}</text></g>` : ''}
+    ${xp && T.sel === 'e:' + e.id ? H`<g class="xb ${xp}"><rect x="${x + lw + 4}" y="${y + 1}" width="${xw}" height="16" rx="8"/><text x="${x + lw + 4 + xw / 2}" y="${y + 12.5}" text-anchor="middle">${xp}</text></g>` : ''}
     ${jobs ? H`<g class="jobchip"><rect x="${x - 50}" y="${y + 1}" width="46" height="16" rx="8"/><text x="${x - 27}" y="${y + 12.5}" text-anchor="middle">${jobs} job${jobs > 1 ? 's' : ''}</text></g>` : ''}</g>`;
 }
 const DEFS = `<defs><pattern id="lb-stripes" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="stripe-a" width="8" height="8"/><line class="stripe-b" x1="0" y1="0" x2="0" y2="8"/></pattern>` +
@@ -154,6 +169,19 @@ function draw() {
   const layers = L.used.map(i => H`<text class="layer-lbl" x="6" y="${L.rowY[i] + GH / 2 + 4}">${LAYER_NAME[i]}</text>`);
   const br = L.brackets.map(b => H`<g class="gbr"><path d="M${b.x0},${b.y - 6} V${b.y - 14} H${b.x1} V${b.y - 6}"/><text x="${b.x0}" y="${b.y - 20}">${b.name}</text></g>`);
   T.svg.innerHTML = DEFS + String(H`${layers}${br}${L.edges.map(edgeSvg)}${L.nodes.map(nodeSvg)}`);
+  // Measure rendered glyphs: character counts do not bound proportional fonts.
+  T.svg.querySelectorAll('g[data-nid]').forEach(group => {
+    const node = L.byId[group.dataset.nid];
+    group.querySelectorAll('text.t1, text.t2, text.t3').forEach(text => {
+      const available = node.w - Number(text.getAttribute('x')) - 18;
+      const full = text.textContent;
+      while (text.textContent.length > 1 && text.getComputedTextLength() > available) {
+        text.textContent = text.textContent.replace(/…$/, '').slice(0, -1) + '…';
+      }
+      const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = full; text.appendChild(title);
+    });
+  });
   if (!L.nodes.length) T.svg.innerHTML += '<text class="layer-lbl" x="20" y="40">No topology data yet — press Refresh all.</text>';
   if (!T.vb) fit(); else applyVB();
 }

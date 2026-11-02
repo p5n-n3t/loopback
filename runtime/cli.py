@@ -415,7 +415,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def http(url: str, *, method: str = "GET", body: bytes | None = None, headers: dict[str, str] | None = None,
          timeout: float = 5, follow: bool = True) -> tuple[int, dict[str, str], bytes]:
     """Small urllib wrapper returning (status, headers, body); status 0 on connection error."""
-    req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+    req = urllib.request.Request(url, data=body, method=method, headers={"User-Agent": "loopback-cli/" + cli_version(), **(headers or {})})
     opener = urllib.request.build_opener() if follow else urllib.request.build_opener(_NoRedirect)
     try:
         with opener.open(req, timeout=timeout) as resp:  # noqa: S310 - caller controls URL

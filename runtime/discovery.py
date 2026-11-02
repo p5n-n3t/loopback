@@ -21,6 +21,7 @@ import re
 import threading
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -46,9 +47,11 @@ def classify_host(target: str, raw: dict[str, Any], *, gateway_port: int | None 
     for r in ts.get("routes") or []:
         target_url = str(r.get("target") or "")
         port = None
-        m = re.search(r":(\d+)/?$", target_url)
-        if m:
-            port = int(m.group(1))
+        try:
+            parsed = urlsplit(target_url)
+            port = parsed.port
+        except ValueError:
+            pass
         https_port = None
         hp = str(r.get("host_port") or "")
         if ":" in hp:
@@ -92,6 +95,7 @@ def classify_host(target: str, raw: dict[str, Any], *, gateway_port: int | None 
             "exposure": "public", "hostname": hostnames[0] if hostnames else None, "hostnames": hostnames, "port": None,
             "path": None, "target": services[0] if services else None, "targets": services, "target_port": None,
             "owner": owner, "owned_by": owned_by, "pid": p.get("pid"), "args": p.get("args"), "config_file": p.get("config_file"),
+            "tunnel_id": p.get("tunnel_id"),
             "kind": "mcp-gateway" if any(MCP_HINT.search(x) for x in hostnames + services) else "route",
             "note": None if p.get("config_file") else "Token-based tunnel: its public hostnames are configured in Cloudflare, not on this host.",
         })
@@ -107,12 +111,17 @@ def classify_host(target: str, raw: dict[str, Any], *, gateway_port: int | None 
             owner = "external"
         listeners.append({**item, "owner": owner, "owned_by": owned_by,
                           "mcp_candidate": port in by_port or (target == "local" and port == gateway_port) or bool(MCP_HINT.search(str(item.get("process") or "")))})
+    from route_correlation import listener_for_route
+    for route in routes:
+        if route["provider"] == "tailscale":
+            route["backend"] = listener_for_route(route, listeners)
     return {
         "target": target, "status": "ok", "observed_at": raw.get("observed_at"), "hostname": raw.get("hostname"),
         "tailscale": {"status": ts.get("status", "unavailable"), "dns_name": dns, "error": ts.get("error")},
         "cloudflared": {"status": cf.get("status", "unavailable"), "error": cf.get("error")},
         "listeners_status": (raw.get("listeners") or {}).get("status", "unavailable"),
         "routes": routes, "listeners": listeners, "bindings": bindings,
+        "mcp_endpoints": raw.get("mcp_endpoints") or [], "mcp_verifications": raw.get("mcp_verifications") or {},
         "partial": any(x.get("status") != "ok" for x in (ts, cf, raw.get("listeners") or {})),
     }
 
@@ -122,6 +131,9 @@ class DiscoveryService:
 
     def __init__(self, ctx: Any, *, cache_seconds: float = 30.0):
         self.ctx = ctx
+        from cloudflare_inventory import CloudflareInventory
+        self.cloudflare = CloudflareInventory(ctx.config.data, ctx.cfg_dir)
+        self.provider_catalog = self.cloudflare.cached()
         self.cache_seconds = cache_seconds
         self.hosts: dict[str, dict[str, Any]] = {}
         self.generated_at: float | None = None
@@ -156,7 +168,7 @@ class DiscoveryService:
             return classify_host(target, raw, gateway_port=gateway_port, controller_ingress=self._controller_ingress() if target == "local" else None)
         except Exception as exc:  # noqa: BLE001 - SSH output is never echoed
             message = str(exc)
-            error = OLD_WORKER if "Unknown binding action" in message else "Host unreachable; check SSH and worker setup"
+            error = OLD_WORKER if "Unknown binding action" in message or "Invalid binding name" in message else "Host unreachable; check SSH and worker setup"
             if "not installed" in message:
                 error = "Worker is not installed on this host; discovery needs the worker"
             stale = copy.deepcopy(previous) if previous and previous.get("observed_at") else None  # only a real inventory counts
@@ -165,6 +177,8 @@ class DiscoveryService:
                     "bindings": (stale or {}).get("bindings", []), "partial": True, "last_known": bool(stale)}
 
     def refresh(self) -> dict[str, Any]:
+        self.cloudflare.config = self.ctx.config.data
+        self.provider_catalog = self.cloudflare.refresh()
         excluded = set(self.excluded_targets())
         targets = [t for t in self.targets() if t not in excluded]
         results: dict[str, dict[str, Any]] = {}
@@ -174,10 +188,13 @@ class DiscoveryService:
         for name in sorted(excluded):
             results[name] = {"target": name, "status": "excluded", "error": "Excluded by discovery policy; never contacted",
                              "routes": [], "listeners": [], "bindings": [], "partial": False}
+        from route_correlation import correlate
+        mappings = ((self.ctx.config.data.get("discovery") or {}).get("cloudflare") or {}).get("host_mappings") or {}
+        self.provider_catalog = correlate(self.provider_catalog, list(results.values()), mappings)
         with self._lock:
             self.hosts = results
             self.generated_at = time.time()
-        return self.inventory()
+        return self.inventory(max_age=float("inf"))
 
     def inventory(self, *, max_age: float | None = None) -> dict[str, Any]:
         max_age = self.cache_seconds if max_age is None else max_age
@@ -189,6 +206,7 @@ class DiscoveryService:
             return self.refresh()
         hosts = [snapshot[k] for k in sorted(snapshot, key=lambda k: (k != "local", k))]
         return {"generated_at": generated_at, "cache_seconds": self.cache_seconds, "hosts": hosts,
+                "cloudflare_catalog": copy.deepcopy(self.provider_catalog),
                 "excluded_targets": self.excluded_targets(),
                 "summary": {"hosts": len(hosts), "reachable": sum(1 for h in hosts if h["status"] == "ok"),
                             "routes": sum(len(h.get("routes") or []) for h in hosts),
@@ -202,7 +220,7 @@ class DiscoveryService:
         with self._lock:
             hosts = copy.deepcopy(self.hosts)
             generated_at = self.generated_at
-        return {"generated_at": generated_at, "hosts": [hosts[k] for k in sorted(hosts, key=lambda k: (k != "local", k))]}
+        return {"generated_at": generated_at, "cloudflare_catalog": copy.deepcopy(self.provider_catalog), "hosts": [hosts[k] for k in sorted(hosts, key=lambda k: (k != "local", k))]}
 
 
 def routes(ctx: Any) -> list[Route]:
@@ -224,7 +242,22 @@ def routes(ctx: Any) -> list[Route]:
         ctx.audit.record("discovery.refresh", "ok", target="dashboard", detail={"hosts": data["summary"]["hosts"]})
         return JSONResponse(data)
 
+    async def verify_endpoint(request: Request):
+        import asyncio
+        try:
+            body = await request.json()
+            target, url = body.get("target"), body.get("url")
+            svc = ctx.discovery
+            if target not in svc.targets() or target in svc.excluded_targets():
+                raise ValueError("Select a registered, non-excluded target")
+            result = await asyncio.to_thread(ctx.workers.call, target, {"action": "discover_verify", "url": url}, timeout=20)
+            ctx.audit.record("discovery.verify", result.get("state", "unverified"), target=target)
+            return JSONResponse(result)
+        except (ValueError, KeyError, AttributeError):
+            return JSONResponse({"detail": "Endpoint verification refused or worker unavailable"}, status_code=400)
+
     return [Route("/api/admin/discovery", get_inventory, methods=["GET"]),
+            Route("/api/admin/discovery/verify", verify_endpoint, methods=["POST"]),
             Route("/api/admin/discovery/refresh", refresh, methods=["POST"])]
 
 

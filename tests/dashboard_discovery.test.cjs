@@ -38,3 +38,14 @@ test('discovered routes show RotoXY exactly as configured and mark ownership and
   assert.match(html, /\[excluded:off\]/);
   assert.match(html, /Never contacted: ora2, ora4/);
 });
+
+test('declared endpoints distinguish verification and never offer stdio execution', () => {
+  const html = context.discoveryHtml({ hosts: [{ target: 'local', status: 'ok',
+    mcp_endpoints: [{ name: 'remote', url: 'https://example.com/mcp', transport: 'http', state: 'declared' },
+                    { name: 'local stdio', transport: 'stdio', state: 'declared' }],
+    mcp_verifications: { 'https://example.com/mcp': { state: 'auth_required' } } }] });
+  assert.match(html, /auth_required/);
+  assert.match(html, /data-act="discovery-verify" data-target="local" data-url="https:\/\/example.com\/mcp"/);
+  assert.equal((html.match(/Verify endpoint/g) || []).length, 1);
+  assert.match(html, /explicit execution required/);
+});

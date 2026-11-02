@@ -219,6 +219,25 @@ def validate(cfg: dict[str, Any]) -> list[str]:
         errors.append("initial_cwd must be null or a non-empty path")
     if cfg.get("node_kind") not in NODE_KINDS:
         errors.append(f"node_kind must be one of {sorted(NODE_KINDS)}")
+    discovery = cfg.get("discovery") or {}
+    if not isinstance(discovery, dict):
+        errors.append("discovery must be an object")
+    else:
+        provider = discovery.get("cloudflare") or {}
+        if not isinstance(provider, dict):
+            errors.append("discovery.cloudflare must be an object")
+        else:
+            if not isinstance(provider.get("enabled", False), bool):
+                errors.append("discovery.cloudflare.enabled must be a boolean")
+            account = provider.get("account_id")
+            if account is not None and (not isinstance(account, str) or not re.fullmatch(r"[0-9a-f]{32}", account)):
+                errors.append("discovery.cloudflare.account_id must be a 32-character hexadecimal ID")
+            token_env = provider.get("token_env")
+            if token_env is not None and (not isinstance(token_env, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token_env)):
+                errors.append("discovery.cloudflare.token_env must name an environment variable")
+            mappings = provider.get("host_mappings", {})
+            if not isinstance(mappings, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in mappings.items()):
+                errors.append("discovery.cloudflare.host_mappings must map tunnel IDs to target names")
     ingress = cfg.get("ingress") or {}
     cf = ingress.get("cloudflare") or {}
     if cf.get("enabled"):

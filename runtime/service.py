@@ -43,6 +43,17 @@ LOG_ROTATE_BYTES = 5 * 1024 * 1024
 
 def _run(cmd: list[str], timeout: float = 30, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """Run a command, never raising for a non-zero exit or a missing binary."""
+    if cmd and Path(cmd[0]).name == "systemctl" and "--user" in cmd and hasattr(os, "getuid"):
+        env = dict(os.environ if env is None else env)
+        if not env.get("DBUS_SESSION_BUS_ADDRESS") and not env.get("XDG_RUNTIME_DIR"):
+            runtime = Path(f"/run/user/{os.getuid()}")
+            bus = runtime / "bus"
+            try:
+                if runtime.stat().st_uid == os.getuid() and bus.is_socket():
+                    env["XDG_RUNTIME_DIR"] = str(runtime)
+                    env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus}"
+            except OSError:
+                pass
     try:
         return subprocess.run(cmd, text=True, capture_output=True, timeout=timeout, env=env)
     except FileNotFoundError as exc:
