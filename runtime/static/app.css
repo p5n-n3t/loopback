@@ -388,3 +388,5 @@ th button.linklike{color:var(--muted);font-weight:500;text-decoration:none}
   .prov-row{grid-template-columns:1fr}
   .axis{white-space:normal}
 }
+
+.te .lbl.hidden{display:none}

@@ -1,0 +1,13 @@
+# Fixture-driven topology checks in one isolated container. No real network topology is created.
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash curl procps iproute2 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+RUN useradd --create-home --uid 10001 loopbacklab
+USER loopbacklab
+ENV HOME=/home/loopbacklab
+CMD ["python3", "/src/lab/oracle/topology-lab.py"]

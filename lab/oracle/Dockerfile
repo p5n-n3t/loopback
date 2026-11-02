@@ -1,0 +1,10 @@
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y --no-install-recommends bash curl openssh-client procps iproute2 && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+RUN useradd --create-home --uid 10001 loopbacklab
+USER loopbacklab
+ENV HOME=/home/loopbacklab
+CMD ["python", "-m", "unittest", "discover", "-s", "tests"]

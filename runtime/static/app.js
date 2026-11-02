@@ -574,12 +574,25 @@ function discoveryHtml(d) {
         <td><code>${r.hostname || '—'}${r.port && r.port !== 443 ? ':' + r.port : ''}${r.path || ''}</code>${arr(r.hostnames).length > 1 ? H`<div class="small muted">+${r.hostnames.length - 1} more hostname(s)</div>` : ''}</td>
         <td><code class="small">${r.target || (r.provider === 'cloudflare' ? 'configured in Cloudflare' : '—')}</code></td><td>${badge(r.exposure || 'unknown', r.exposure === 'public' ? 'bad' : r.exposure === 'tailnet' ? 'info' : 'ok')}</td><td>${ownerBadge(r)}</td><td>${r.kind === 'mcp-gateway' ? badge('MCP gateway', 'info') : ''}${r.note ? H`<div class="small muted">${r.note}</div>` : ''}</td></tr>`)}
       ${candidates.map(l => H`<tr data-listener="${l.port}" data-owner="${l.owner}"><td>${badge('listener', 'off')}</td><td><code>${l.address}:${l.port}</code></td><td><code class="small">${l.process ? l.process + (l.pid ? ' (' + l.pid + ')' : '') : 'owner unknown'}</code></td><td>${badge(/^(127\.|::1)/.test(l.address) ? 'local' : 'bound', /^(127\.|::1)/.test(l.address) ? 'ok' : 'warn')}</td><td>${ownerBadge(l)}</td><td>${l.mcp_candidate ? badge('candidate', 'off') : ''}</td></tr>`)}` : H`<tr><td colspan="6" class="muted small">${h.status === 'ok' ? 'No tunnels, Serve/Funnel handlers or MCP candidates observed.' : 'No inventory available.'}</td></tr>`;
-    return H`${head}${body}`;
+    const endpoints = arr(h.mcp_endpoints).map(e => {
+      const verification = (h.mcp_verifications || {})[e.url] || {};
+      return H`<tr><td>${badge('MCP declaration', 'info')}</td><td><code>${e.name}</code></td><td><code>${e.url || 'stdio · explicit execution required'}</code></td><td>${e.transport}</td><td>${badge(verification.state || e.state || 'declared', verification.state === 'mcp_verified' ? 'ok' : 'off')}</td><td>${e.url ? H`<button class="sm" data-act="discovery-verify" data-target="${h.target}" data-url="${e.url}">Verify endpoint</button>` : ''}</td></tr>`;
+    });
+    return H`${head}${body}${endpoints}`;
   });
   return H`<p class="section-desc">${S.hosts || 0} host(s) · ${S.reachable || 0} reachable · ${S.routes || 0} route(s): ${S.managed || 0} managed, ${S.external || 0} external · ${S.gateways || 0} MCP gateway(s). ${d.generated_at ? 'Scanned ' + rel(d.generated_at) + '.' : ''} ${arr(d.excluded_targets).length ? 'Never contacted: ' + d.excluded_targets.join(', ') + '.' : ''}</p>
     ${table(['Provider', 'Public address', 'Handler target', 'Exposure', 'Owner', ''], hostRows, 'No hosts registered.')}
     <p class="small muted">${d.note || ''}</p>`;
 }
+A['discovery-verify'] = async t => {
+  t.disabled = true;
+  try {
+    const result = await post('/api/admin/discovery/verify', {target: t.dataset.target, url: t.dataset.url});
+    toast(result.state || 'unverified', result.state === 'mcp_verified' ? 'ok' : 'info');
+    const d = await post('/api/admin/discovery/refresh');
+    const el = $('#discovery-list'); if (el) el.innerHTML = String(discoveryHtml(d));
+  } finally { if (t.isConnected) t.disabled = false; }
+};
 A['discovery-refresh'] = async t => {
   const old = t.textContent; t.innerHTML = '<span class="spin"></span> Scanning';
   try { const d = await post('/api/admin/discovery/refresh'); const el = $('#discovery-list'); if (el) el.innerHTML = String(discoveryHtml(d)); toast(`Scanned ${(d.summary || {}).hosts || 0} host(s)`, 'ok'); }

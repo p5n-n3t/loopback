@@ -6,7 +6,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from helpers import fresh_config_dir, load_server
 
@@ -44,6 +44,17 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(funnel, {"provider": "tailscale", "mode": "funnel", "host_port": "jq-xubuntu1.bigeye-escalator.ts.net:443",
                                   "path": "/", "target": "http://127.0.0.1:2030", "foreground": True})
         self.assertEqual(next(r for r in routes if r["path"] == "/mcp")["mode"], "serve")
+
+    def test_proxy_backend_port_is_retained_when_url_has_a_path(self):
+        raw = snapshot(tailscale={"status": "ok", "routes": [{"host_port": "example.ts.net:443", "path": "/gateway", "target": "http://127.0.0.1:3031/mcp"}]})
+        host = discovery.classify_host("local", raw)
+        self.assertEqual(host["routes"][0]["target_port"], 3031)
+        self.assertEqual(host["routes"][0]["kind"], "mcp-gateway")
+
+    def test_https_listener_metadata_is_not_a_tcp_route(self):
+        routes = node_agent.tailscale_routes({"TCP": {"443": {"HTTPS": True}, "8443": {"TCPForward": "127.0.0.1:3000"}}})
+        self.assertEqual(len(routes), 1)
+        self.assertEqual(routes[0]["target"], "tcp:127.0.0.1:3000")
 
     def test_rotoxy_is_external_managed_binding_is_managed_and_nothing_is_mutated(self):
         host = discovery.classify_host("local", snapshot(), gateway_port=2026, controller_ingress={"tailscale": {"enabled": False}, "cloudflare": {}})
@@ -145,6 +156,12 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(inv["summary"]["managed"], 2)
         self.assertEqual(inv["excluded_targets"], ["ora2", "ora4"])
 
+    def test_zero_cache_duration_refresh_returns_without_recursion(self):
+        self.svc.cache_seconds = 0
+        inventory = self.svc.inventory()
+        self.assertTrue(inventory["hosts"])
+        self.assertLess(len(self.calls), 10)
+
     def test_cache_and_last_known_on_later_failure(self):
         self.svc.inventory()
         n = len(self.calls)
@@ -201,6 +218,38 @@ class TopologyAndApiTests(unittest.TestCase):
         # The managed binding route belongs to a service node, not a second route node.
         self.assertFalse(any(n["detail"].get("owned_by") == "ora1-system" for n in routes))
         self.assertEqual(graph["legend"]["ownership"], ["managed", "external", "unknown"])
+
+    def test_topology_draws_provider_host_evidence_and_declared_endpoints(self):
+        catalog = {"observed_at": time.time(), "stale": False, "source": "fixture", "tunnels": [
+            {"id": "abc", "host": "local", "host_association": "matched", "host_evidence": "observed-tunnel-id",
+             "ingress": [{"hostname": "gateway.example", "service": "http://127.0.0.1:8000"}]}]}
+        inventory = {"cloudflare_catalog": catalog, "hosts": [{"target": "local", "status": "ok", "routes": [],
+                     "mcp_endpoints": [{"name": "declared gateway", "url": "https://other.example/mcp", "transport": "http"}]}]}
+        with patch.object(self.server.CTX.discovery, "cached", return_value=inventory):
+            graph = self.server.CTX.topology.build()
+        provider = next(n for n in graph["nodes"] if n["id"].startswith("provider:cloudflare:"))
+        self.assertEqual(provider["detail"]["host_association"], "matched")
+        self.assertTrue(any(e["from"] == provider["id"] and e["to"] == "gateway" for e in graph["edges"]))
+        self.assertFalse(any(n["id"].startswith("declared-mcp:") for n in graph["nodes"]))
+
+    def test_topology_first_load_populates_cold_inventory(self):
+        with patch.object(self.server.CTX.discovery, "cached", return_value={"generated_at": None, "hosts": []}), \
+             patch.object(self.server.CTX.discovery, "refresh") as collect, \
+             patch.object(self.server.CTX.workers, "snapshot"), \
+             patch.object(self.server.CTX.topology, "build", return_value={"nodes": [], "edges": []}):
+            response = self.c.get("/api/admin/topology")
+            self.assertEqual(response.status_code, 200)
+            collect.assert_called_once()
+
+    def test_topology_refresh_collects_discovery_before_build(self):
+        async def build_after_discovery():
+            collect.assert_called_once()
+            return {"nodes": [], "edges": []}
+
+        with patch.object(self.server.CTX.discovery, "refresh") as collect, \
+             patch.object(self.server.CTX.topology, "refresh", new=AsyncMock(side_effect=build_after_discovery)):
+            response = self.c.post("/api/admin/topology/refresh", headers=self.csrf)
+            self.assertEqual(response.status_code, 200, response.text)
 
     def test_refresh_requires_csrf(self):
         self.assertEqual(self.c.post("/api/admin/discovery/refresh").status_code, 403)

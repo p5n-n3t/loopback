@@ -21,7 +21,9 @@ class IdentityTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(ident.shell) and os.access(ident.shell, os.X_OK))
         self.assertIn(ident.platform, {"linux", "darwin", "windows"})
         self.assertIn(ident.service_manager, {"systemd-user", "launchd", "windows-task-scheduler", "none"})
-        self.assertNotIn("/home/jq", ident.home)
+        if identity.pwd is not None:
+            account, _, _ = identity._posix_account(prefer_sudo_user=True)
+            self.assertEqual(ident.home, account.pw_dir)
 
     def test_config_dir_override_and_xdg(self):
         with tempfile.TemporaryDirectory() as td:

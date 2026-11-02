@@ -1,0 +1,23 @@
+# Container for the actual same-version lifecycle runner; see lab/network/README.md.
+FROM python:3.11-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash curl openssh-client procps iproute2 jq \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src-base
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+RUN useradd --create-home --uid 10001 loopbacklab
+USER loopbacklab
+ENV HOME=/home/loopbacklab
+
+FROM base AS upgraded
+USER root
+WORKDIR /src
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+RUN chown -R loopbacklab:loopbacklab /src
+USER loopbacklab
+ENV HOME=/home/loopbacklab
+CMD ["bash", "/src/lab/oracle/upgrade-test.sh"]

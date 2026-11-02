@@ -266,6 +266,9 @@ def routes(ctx: Any) -> list[Route]:
     @_handler
     async def topology_get(request: Request) -> JSONResponse:
         topo = _require(getattr(ctx, "topology", None), "topology")
+        discovery = getattr(ctx, "discovery", None)
+        if discovery is not None and discovery.cached().get("generated_at") is None:
+            await asyncio.to_thread(discovery.refresh)
         if getattr(ctx, "workers", None):
             await asyncio.to_thread(ctx.workers.snapshot)
         return JSONResponse(await asyncio.to_thread(topo.build))
@@ -273,6 +276,9 @@ def routes(ctx: Any) -> list[Route]:
     @_handler
     async def topology_refresh(request: Request) -> JSONResponse:
         topo = _require(getattr(ctx, "topology", None), "topology")
+        discovery = getattr(ctx, "discovery", None)
+        if discovery is not None:
+            await asyncio.to_thread(discovery.refresh)
         result = await topo.refresh()
         _audit(ctx, "topology.refresh", None, detail={"duration_ms": getattr(topo, "last_refresh_ms", None)})
         return JSONResponse(result)
