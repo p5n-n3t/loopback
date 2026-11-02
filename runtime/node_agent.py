@@ -542,11 +542,47 @@ def verify_mcp_candidate(root, url):
     return result
 
 
+def ngrok_routes(root):
+    """Read an explicitly enabled, already-existing loopback inspection API only."""
+    import httpx
+    settings = read_json(root / 'discovery-providers.json', {})
+    endpoint = settings.get('ngrok_api')
+    if not endpoint:
+        return {'status': 'not_configured', 'routes': []}
+    try:
+        parsed = urlsplit(endpoint)
+        if parsed.scheme != 'http' or parsed.hostname not in {'127.0.0.1', '::1'} or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in {'', '/'}:
+            return {'status': 'invalid_configuration', 'routes': []}
+        with httpx.Client(timeout=3, follow_redirects=False, trust_env=False) as client:
+            with client.stream('GET', endpoint.rstrip('/') + '/api/tunnels') as response:
+                response.raise_for_status()
+                raw = bytearray()
+                for chunk in response.iter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > 1024 * 1024:
+                        raise ValueError('response too large')
+        data = json.loads(raw)
+        routes = []
+        for tunnel in (data.get('tunnels') or [])[:100]:
+            public = urlsplit(str(tunnel.get('public_url') or ''))
+            backend = urlsplit(str((tunnel.get('config') or {}).get('addr') or ''))
+            if public.scheme not in {'http', 'https', 'tcp'} or not public.hostname or public.username or public.password:
+                continue
+            if backend.scheme not in {'http', 'https', 'tcp'} or not backend.hostname or backend.username or backend.password:
+                continue
+            host = '[' + backend.hostname + ']' if ':' in backend.hostname else backend.hostname
+            service = backend.scheme + '://' + host + (':' + str(backend.port) if backend.port else '') + (backend.path or '')
+            routes.append({'hostname': public.hostname, 'port': public.port, 'path': public.path or '/', 'target': service})
+        return {'status': 'ok', 'routes': routes}
+    except (ValueError, OSError, httpx.HTTPError):
+        return {'status': 'unavailable', 'routes': []}
+
+
 def discover(root):
     """Read-only host inventory: nothing here starts, stops or rewrites anything."""
     out = {'observed_at': time.time(), 'hostname': socket.gethostname(), 'tailscale': {'status': 'ok', 'routes': [], 'dns_name': None},
            'cloudflared': {'status': 'ok', 'processes': []}, 'listeners': {'status': 'ok', 'items': []}, 'bindings': [],
-           'mcp_endpoints': [], 'mcp_verifications': {}}
+           'mcp_endpoints': [], 'mcp_verifications': {}, 'ngrok': ngrok_routes(root)}
     try:
         out['tailscale']['routes'] = tailscale_routes(serve_config())
         status = json.loads(run(['tailscale', 'status', '--json']))

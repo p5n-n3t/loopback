@@ -99,6 +99,10 @@ def classify_host(target: str, raw: dict[str, Any], *, gateway_port: int | None 
             "kind": "mcp-gateway" if any(MCP_HINT.search(x) for x in hostnames + services) else "route",
             "note": None if p.get("config_file") else "Token-based tunnel: its public hostnames are configured in Cloudflare, not on this host.",
         })
+    for index, route in enumerate((raw.get("ngrok") or {}).get("routes") or []):
+        routes.append({**route, "id": f"{target}:ngrok:{index}", "host": target, "provider": "ngrok", "mode": "tunnel",
+                       "exposure": "public", "owner": "external", "owned_by": None, "kind": "route",
+                       "note": "Observed through the explicitly configured local ngrok API; MCP readiness unverified."})
     listeners: list[dict[str, Any]] = []
     for item in (raw.get("listeners") or {}).get("items") or []:
         port = item.get("port")
@@ -113,12 +117,13 @@ def classify_host(target: str, raw: dict[str, Any], *, gateway_port: int | None 
                           "mcp_candidate": port in by_port or (target == "local" and port == gateway_port) or bool(MCP_HINT.search(str(item.get("process") or "")))})
     from route_correlation import listener_for_route
     for route in routes:
-        if route["provider"] == "tailscale":
+        if route["provider"] in {"tailscale", "ngrok"}:
             route["backend"] = listener_for_route(route, listeners)
     return {
         "target": target, "status": "ok", "observed_at": raw.get("observed_at"), "hostname": raw.get("hostname"),
         "tailscale": {"status": ts.get("status", "unavailable"), "dns_name": dns, "error": ts.get("error")},
         "cloudflared": {"status": cf.get("status", "unavailable"), "error": cf.get("error")},
+        "ngrok": {"status": (raw.get("ngrok") or {}).get("status", "not_configured")},
         "listeners_status": (raw.get("listeners") or {}).get("status", "unavailable"),
         "routes": routes, "listeners": listeners, "bindings": bindings,
         "mcp_endpoints": raw.get("mcp_endpoints") or [], "mcp_verifications": raw.get("mcp_verifications") or {},
