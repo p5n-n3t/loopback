@@ -24,6 +24,7 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +69,17 @@ FLEET = CTX.fleet
 CFG = CTX.cfg_dir
 STARTED_AT = CTX.started_at
 WINDOWS = sys.platform.startswith("win")
+
+SSH_RECEIPT = contextvars.ContextVar("ssh_receipt", default=None)
+
+
+def _ssh_stage(stage, **detail):
+    receipt = SSH_RECEIPT.get()
+    if receipt is not None:
+        AUDIT.record("ssh_execute", stage, target=receipt["target"], principal=_principal_name(),
+                     detail={"receipt_id": receipt["id"], **detail})
+        receipt["stage"] = stage
+
 
 CURRENT_PRINCIPAL: contextvars.ContextVar[Principal | None] = contextvars.ContextVar("loopback_principal", default=None)
 
@@ -708,11 +720,27 @@ def ssh_target_list() -> list[dict[str, Any]]:
 async def ssh_execute(target: str, command: str, cwd: str | None = None, timeout: int | None = None, approval_id: str | None = None) -> dict[str, Any]:
     """Run a command on a managed SSH target (remote machine). The gateway checks the target's command and path policy first;
     the remote host itself has no Loopback sandbox unless it runs Loopback."""
-    POLICY.check_fleet()
-    if CTX.ssh is None:
-        raise RuntimeError("SSH targets module is unavailable on this gateway")
-    return await CTX.ssh.execute(target, command, cwd=cwd, timeout=int(timeout or default_timeout()), approval_id=approval_id,
-                                 max_output=max_output())
+    try:
+        POLICY.check_fleet()
+        if CTX.ssh is None:
+            raise RuntimeError("SSH targets module is unavailable on this gateway")
+        result = await CTX.ssh.execute(target, command, cwd=cwd, timeout=int(timeout or default_timeout()), approval_id=approval_id,
+                                       max_output=max_output(), observe=_ssh_stage)
+    except ApprovalRequired as exc:
+        _ssh_stage("approval_required", approval_id=exc.approval_id)
+        raise
+    except PolicyError:
+        _ssh_stage("policy_denied")
+        raise
+    except Exception as exc:
+        _ssh_stage("execution_error", error_type=type(exc).__name__)
+        raise
+    code = result["returncode"]
+    outcome = "timed_out" if result["timed_out"] else "ssh_exit_255" if code == 255 else "nonzero_exit" if code else "completed"
+    _ssh_stage(outcome, returncode=code)
+    if receipt := SSH_RECEIPT.get():
+        result["receipt_id"] = receipt["id"]
+    return result
 
 
 # -------------------------------------------------------------- documents
@@ -1011,6 +1039,13 @@ class McpGate:
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http" or scope.get("path") not in {"/mcp", "/mcp/"} or scope.get("method") != "POST":
             return await self.wrapped(scope, receive, send)
+        token = SSH_RECEIPT.set(None)
+        try:
+            return await self._handle(scope, receive, send)
+        finally:
+            SSH_RECEIPT.reset(token)
+
+    async def _handle(self, scope, receive, send):
         chunks: list[bytes] = []
         more = True
         while more:
@@ -1045,16 +1080,37 @@ class McpGate:
             if method == "tools/call" and isinstance(params, dict):
                 target = str(params.get("name") or "") or None
                 tool = target or method
+                if tool == "ssh_execute":
+                    from ssh_targets import NAME_RE
+                    arguments = params.get("arguments")
+                    alias = arguments.get("target") if isinstance(arguments, dict) else None
+                    receipt = {"id": uuid.uuid4().hex, "target": alias if isinstance(alias, str) and NAME_RE.fullmatch(alias) else None}
+                    SSH_RECEIPT.set(receipt)
+                    original_send = send
+
+                    async def receipt_send(message):
+                        if message["type"] == "http.response.start":
+                            message = {**message, "headers": [*message.get("headers", []), (b"x-loopback-receipt", receipt["id"].encode())]}
+                        await original_send(message)
+
+                    send = receipt_send
+                    _ssh_stage("received")
                 try:
                     POLICY.check_tool(tool)
                 except PolicyError as exc:
-                    AUDIT.record(tool, "policy_denied", target=target, principal=principal.display if principal else None,
+                    if tool == "ssh_execute":
+                        _ssh_stage("policy_denied")
+                    else:
+                        AUDIT.record(tool, "policy_denied", target=target, principal=principal.display if principal else None,
                                  principal_kind=principal.kind if principal else None)
                     response = JSONResponse({"jsonrpc": "2.0", "id": payload_id, "error": {"code": -32001, "message": str(exc)}}, status_code=200)
                     return await response(scope, receive, send)
                 required = TOOL_META.get(tool, {}).get("scope", "loopback:exec")
                 if principal is not None and not principal.has(required):
-                    AUDIT.record(tool, "insufficient_scope", target=target, principal=principal.display, principal_kind=principal.kind,
+                    if tool == "ssh_execute":
+                        _ssh_stage("insufficient_scope", required_scope=required)
+                    else:
+                        AUDIT.record(tool, "insufficient_scope", target=target, principal=principal.display, principal_kind=principal.kind,
                                  detail={"required_scope": required, "granted_scopes": sorted(principal.scopes)})
                     request = Request(scope)
                     description = f"tool {tool} requires scope {required}"
@@ -1086,7 +1142,11 @@ class McpGate:
             raise
         finally:
             h = _headers(scope)
-            AUDIT.record(tool, "ok" if error is None and status_code < 400 else (error or f"http_{status_code}"),
+            if receipt := SSH_RECEIPT.get():
+                if receipt.get("stage") == "received":
+                    _ssh_stage("handler_not_observed", http_status=status_code)
+            else:
+                AUDIT.record(tool, "ok" if error is None and status_code < 400 else (error or f"http_{status_code}"),
                          duration_ms=int((time.time() - started) * 1000), target=target,
                          detail={"user_agent": h.get("user-agent", "")[:200]},
                          principal=principal.display if principal else None, principal_kind=principal.kind if principal else None)
