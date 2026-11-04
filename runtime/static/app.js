@@ -371,7 +371,7 @@ function auditTable(rows) {
   return table(['When', 'Principal', 'Tool', 'Status', ['ms', 'num'], 'Target'], rows.map(x => {
     const d = x.detail || {};
     const who = x.principal_display || x.principal || d.principal_display || d.principal || d.client || '';
-    return H`<tr><td>${time(x.ts)}</td><td>${typeof who === 'object' ? who.display || who.kind : who}</td><td><code>${x.tool}</code></td><td>${badge(x.status, x.status === 'ok' ? 'ok' : x.status === 'denied' || x.status === 'error' ? 'bad' : 'warn')}</td><td class="num">${x.duration_ms ?? ''}</td><td>${targetBadge(x.target)}</td></tr>`;
+    return H`<tr><td>${time(x.ts)}</td><td>${typeof who === 'object' ? who.display || who.kind : who}</td><td><code>${x.tool}</code></td><td>${badge(x.status, x.status === 'ok' ? 'ok' : x.status === 'denied' || x.status === 'error' ? 'bad' : 'warn')}</td><td class="num">${x.duration_ms ?? ''}</td><td>${targetBadge(x.target)}${d.receipt_id ? H`<div class="small">Receipt <code>${d.receipt_id}</code>${d.returncode != null ? H` · exit ${d.returncode}` : ''}</div>` : ''}</td></tr>`;
   }), 'No MCP calls recorded yet.');
 }
 function alertsHtml(alerts) {

@@ -548,7 +548,7 @@ class SSHTargetStore:
         return "sh -c " + shlex.quote(outer)
 
     async def execute(self, name: str, command: str, cwd: str | None = None, timeout: float = 120,
-                      max_output: int = 1048576, approval_id: str | None = None) -> dict[str, Any]:
+                      max_output: int = 1048576, approval_id: str | None = None, observe=None) -> dict[str, Any]:
         """Run *command* on target *name* after gateway policy checks.
 
         Policy (``check_command`` and, when *cwd* is set, ``check_path``) is
@@ -562,10 +562,14 @@ class SSHTargetStore:
         self.ctx.policy.check_command(command, approval_id=approval_id, target=name)
         if cwd:
             self.ctx.policy.check_path(cwd, target=name)
+        if observe:
+            observe("policy_allowed")
         max_output = max(1024, min(int(max_output), 64 * 1024 * 1024))
         timeout = max(1.0, min(float(timeout), 86400.0))
         args = self._ssh_args(target) + [self._remote_command(command, cwd)]
         started = time.monotonic()
+        if observe:
+            observe("ssh_dispatch_attempted")
         proc = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.DEVNULL,
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                                                     start_new_session=True)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from helpers import call_tool, fresh_config_dir, load_server, tool_text
 
@@ -79,6 +80,26 @@ class FabricApiTests(unittest.TestCase):
         self.assertEqual(self.c.get("/api/admin/permissions?target=vm1").json()["allowed_roots"][0]["path"], "/srv/app")
         self.assertNotEqual(self.c.get("/api/admin/permissions?target=local").json()["allowed_roots"][0]["path"], "/srv/app")
         self.assertEqual(self.c.delete("/api/admin/ssh/vm1", headers=self.csrf).status_code, 200)
+
+    def test_ssh_receipts_distinguish_denial_launch_and_exit(self):
+        self.c.post("/api/admin/ssh", headers=self.csrf, json={"name": "receipt-test", "host": "127.0.0.1", "user": "test"})
+        self.addCleanup(self.c.delete, "/api/admin/ssh/receipt-test", headers=self.csrf)
+
+        def stages(command, argv):
+            with patch.object(self.server.CTX.ssh, "_ssh_args", return_value=argv):
+                response = call_tool(self.c, self.h, "ssh_execute", {"target": "receipt-test", "command": command})
+            receipt = response.headers["x-loopback-receipt"]
+            rows = [r for r in reversed(self.server.AUDIT.recent(100)) if r["detail"].get("receipt_id") == receipt]
+            self.assertTrue(all(r["target"] == "receipt-test" for r in rows))
+            self.assertNotIn(command, json.dumps(rows))
+            return [r["status"] for r in rows], rows[-1]["detail"]
+        denied, _ = stages("rm -rf /", [])
+        self.assertEqual(denied, ["received", "policy_denied"])
+        failed, _ = stages("echo test-private-marker", ["/nonexistent/ssh"])
+        self.assertEqual(failed, ["received", "policy_allowed", "ssh_dispatch_attempted", "execution_error"])
+        exits, detail = stages("echo test-private-marker", ["/bin/sh", "-c", "exit 7"])
+        self.assertEqual(exits, ["received", "policy_allowed", "ssh_dispatch_attempted", "nonzero_exit"])
+        self.assertEqual(detail["returncode"], 7)
 
     def test_topology_rename_persists(self):
         r = self.c.put("/api/admin/topology/nodes/gateway", json={"display_name": "Alice's desk", "group": "home"}, headers=self.csrf)
