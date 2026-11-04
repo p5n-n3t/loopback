@@ -83,6 +83,8 @@ class FabricApiTests(unittest.TestCase):
 
     def test_ssh_receipts_distinguish_denial_launch_and_exit(self):
         self.c.post("/api/admin/ssh", headers=self.csrf, json={"name": "receipt-test", "host": "127.0.0.1", "user": "test"})
+        self.addCleanup(self.c.delete, "/api/admin/ssh/receipt-test", headers=self.csrf)
+
         def stages(command, argv):
             with patch.object(self.server.CTX.ssh, "_ssh_args", return_value=argv):
                 response = call_tool(self.c, self.h, "ssh_execute", {"target": "receipt-test", "command": command})
