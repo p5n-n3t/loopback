@@ -1385,11 +1385,99 @@ A['stop-job'] = async t => { if (!await confirmDo('Stop job?', H`<p>Send SIGTERM
 A['close-term'] = async t => { if (!await confirmDo('Close terminal?', H`<p>Close terminal <code>${t.dataset.id}</code>? Its processes are terminated.</p>`, 'Close')) return; await post(`/api/admin/terminals/${enc(t.dataset.id)}/close`); done('Closed'); };
 
 /* -- Logs & diagnostics */
+/* -- Execution traces -----------------------------------------------------
+ * A trace joins the local client recorder (when one is available) to the
+ * gateway's authenticated receipt. Missing gateway evidence stays unknown:
+ * the dashboard never turns it into an OpenAI safety classification.
+ */
+const traceFilters = { status: 'all', search: '', since: '', until: '' };
+let traceSearchTimer = null;
+const traceUtc = ts => ts == null ? 'unavailable' : new Date(Number(ts) * 1000).toISOString().replace('.000Z', 'Z');
+const traceStatusParam = status => status === 'successful' ? 'success' : status;
+const traceStateLabel = t => {
+  const c = String(t.classification || '').toLowerCase();
+  const s = String(t.state || '').toLowerCase();
+  if (c.includes('safety') || c.includes('blocked') || c.includes('denied') || c.includes('rejection') || c.includes('approval_required') || s.includes('blocked') || s === 'policy_denied' || s === 'insufficient_scope' || s === 'approval_required') return 'blocked';
+  if (c.includes('success') || c === 'completed' || s === 'completed' || s === 'handler_completed' || (s === 'complete' && t.returncode === 0)) return 'successful';
+  if (c.includes('failure') || c.includes('error') || c.includes('transport') || c.includes('remote_command') || c.includes('nonzero') || s.includes('failed') || ['execution_error', 'http_error', 'protocol_error', 'nonzero_exit', 'ssh_exit_255', 'timed_out', 'cancelled'].includes(s)) return 'failed';
+  return 'unresolved';
+};
+const traceOutcomeText = t => {
+  const c = String(t.classification || '');
+  if (c) return c.replaceAll('_', ' ');
+  return String(t.state || 'pending').replaceAll('_', ' ');
+};
+function traceStages(t) {
+  const ev = arr(t.events).slice().sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+  return ev.length ? H`<ol class="trace-stages">${ev.map(e => H`<li><span class="trace-stage-name">${String(e.stage || 'event').replaceAll('_', ' ')}</span><time>${traceUtc(e.ts)}</time>${e.detail && Object.keys(e.detail).length ? H`<small>${Object.entries(e.detail).map(([k, v]) => `${k.replaceAll('_', ' ')}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join(' · ')}</small>` : ''}</li>`)}</ol>` : H`<p class="muted">No gateway stages recorded.</p>`;
+}
+function traceRows(traces) {
+  const groups = new Map();
+  for (const t of traces) {
+    const key = [traceStateLabel(t), t.classification || t.state || 'unknown result', t.tool || 'unknown tool', t.target || 'unknown target'].join('|');
+    groups.set(key, (groups.get(key) || 0) + 1);
+  }
+  return traces.map(rawTrace => {
+    const t = rawTrace.trace || rawTrace, state = traceStateLabel(t), id = t.trace_id || 'unknown';
+    const key = [state, t.classification || t.state || 'unknown result', t.tool || 'unknown tool', t.target || 'unknown target'].join('|');
+    const grp = groups.get(key) || 1;
+    const reports = arr(t.client_reports);
+    const gateway = t.gateway_seen_at ? `Observed at gateway ${traceUtc(t.gateway_seen_at)}` : 'No gateway receipt observed';
+    const remote = t.remote_execution === 'completed' ? 'Remote execution completed' : t.remote_execution === 'dispatch_attempted' ? 'SSH dispatch attempted; final result unknown' : t.remote_execution === 'not_observed' ? 'Remote execution not observed' : 'Remote execution state unknown';
+    const reportLinks = H`<span class="row"><a class="btn sm" href="/api/admin/traces/${enc(id)}/export?format=json" download>JSON report</a><a class="btn sm" href="/api/admin/traces/${enc(id)}/export?format=markdown" download>Markdown report</a></span>`;
+    return H`<tr class="trace-row" data-testid="trace-row"><td><time>${traceUtc(t.created_at)}</time><div class="small muted">${rel(t.created_at)}</div></td>
+      <td>${badge(state, state === 'successful' ? 'ok' : state === 'blocked' ? 'bad' : state === 'failed' ? 'warn' : 'off')}<div class="small">${traceOutcomeText(t)}</div></td>
+      <td><b>${t.tool || 'unknown tool'}</b><div class="small muted">Target: ${t.target || 'not specified'}</div><div class="small muted">Client: ${t.client || 'unknown'}</div></td>
+      <td>${t.receipt_id ? H`<code>${t.receipt_id}</code>` : H`<span class="muted">not recorded</span>`}<div class="small muted">${gateway}</div><div class="small">${remote}${t.returncode != null ? ` (exit ${t.returncode})` : ''}</div></td>
+      <td>${grp > 1 ? badge(`${grp} similar`, 'info') : badge('single', 'info')}<div class="small muted">same classification, tool and target</div></td></tr>
+      <tr class="trace-detail-row"><td colspan="5"><details><summary>Trace ${id} · inspect evidence</summary>
+        <div class="trace-detail"><div><b>Client evidence</b>${reports.length ? H`<ul>${reports.map(r => H`<li>${r.outcome || 'reported'}${r.error_message ? `: ${r.error_message}` : ''}${r.receipt_id ? ` · receipt ${r.receipt_id}` : ''} <span class="muted">(${traceUtc(r.reported_at)})</span></li>`)}</ul>` : H`<p class="muted">No client report attached.</p>`}</div>
+        <div><b>Gateway timeline</b>${traceStages(t)}</div></div>
+        ${t.last_successful_receipt_id ? H`<p class="small">Last successful receipt: <code>${t.last_successful_receipt_id}</code></p>` : ''}
+        <p class="small muted">${remote}. A successful exit does not establish whether the requested state change occurred. Missing gateway evidence alone cannot identify why a request did not arrive.</p>${reportLinks}</details></td></tr>`;
+  });
+}
+views.traces = async v => {
+  const params = new URLSearchParams({ limit: '200', status: traceStatusParam(traceFilters.status) });
+  if (traceFilters.search.trim()) params.set('search', traceFilters.search.trim());
+  if (traceFilters.since) params.set('since', String(Date.parse(traceFilters.since + 'Z') / 1000));
+  if (traceFilters.until) params.set('until', String(Date.parse(traceFilters.until + 'Z') / 1000));
+  const data = await soft(`/api/admin/traces?${params}`), traces = arr(data, 'traces');
+  if (!v.alive()) return;
+  const coverage = data && data.coverage || {};
+  v.render(H`${head('Execution traces', 'Persistent request evidence from client intent through gateway dispatch and result.', H`<button class="sm" data-act="traces-refresh">Refresh</button>`)}
+    <div class="alert info trace-coverage"><span><b>Coverage:</b> Gateway evidence is automatic. Client preflight and explicit error reports appear only for instrumented clients. ${coverage.chatgpt_web === 'unavailable' || !coverage.chatgpt_web ? 'ChatGPT Web does not expose pre-dispatch events to this gateway; an upstream rejection may leave no client record here.' : ''} An absent receipt is unresolved until the client reports its own outcome.</span></div>
+    <section class="card c12 trace-filters"><div class="row">
+      <label class="field inline"><span>Status</span><select data-change="trace-status" aria-label="Filter trace status">${[['all','All'],['successful','Successful'],['failed','Failed'],['blocked','Blocked'],['unresolved','Unresolved']].map(([x,l]) => opt(x, traceFilters.status, l))}</select></label>
+      <label class="field inline grow"><span>Target, tool, receipt or client</span><input type="search" value="${traceFilters.search}" placeholder="Search traces" data-input="trace-search" aria-label="Search traces"></label>
+      <label class="field inline"><span>From (UTC)</span><input type="datetime-local" value="${traceFilters.since}" data-change="trace-since" aria-label="From time in UTC"></label>
+      <label class="field inline"><span>To (UTC)</span><input type="datetime-local" value="${traceFilters.until}" data-change="trace-until" aria-label="To time in UTC"></label>
+    </div><div class="small muted">${traces.length} trace${traces.length === 1 ? '' : 's'} shown · filters use UTC · newest first</div></section>
+    ${table(['Time', 'Outcome', 'Operation', 'Gateway / remote', 'Related group'], traceRows(traces), data ? 'No traces match these filters.' : 'Trace endpoint unavailable.')} `);
+  v.poll(30000, async () => {
+    if (!v.alive()) return;
+    const detailOpen = $('#main .trace-detail-row details[open]');
+    const filterFocused = doc.activeElement?.closest?.('.trace-filters');
+    if (detailOpen || filterFocused) return;
+    await views.traces(v);
+  });
+};
+async function reloadTraces() { await route(); }
+C['trace-status'] = t => { traceFilters.status = t.value; return reloadTraces(); };
+C['trace-since'] = t => { traceFilters.since = t.value; return reloadTraces(); };
+C['trace-until'] = t => { traceFilters.until = t.value; return reloadTraces(); };
+I['trace-search'] = t => {
+  traceFilters.search = t.value;
+  clearTimeout(traceSearchTimer);
+  traceSearchTimer = setTimeout(() => { if (parseHash().name === 'traces') reloadTraces(); }, 300);
+};
+A['traces-refresh'] = () => reloadTraces();
+
 const lg = { file: 'server', lines: 200, auto: false };
 views.logs = async v => {
   const [doctor, metrics, audit] = await Promise.all([soft('/api/admin/doctor'), soft('/api/admin/metrics'), soft('/api/admin/audit?limit=100')]);
   const checks = arr(doctor, 'checks'), m = metrics || {};
-  v.render(H`${head('Logs & diagnostics', 'Health checks, redacted logs and a support bundle.', H`<button class="primary" data-act="bundle">Create diagnostic bundle</button>`)}
+  v.render(H`${head('Logs & diagnostics', 'Health checks, redacted logs and a support bundle.', H`<a class="btn sm" href="#/traces">Execution traces</a><button class="primary" data-act="bundle">Create diagnostic bundle</button>`)}
     <div id="bundleOut"></div><div class="grid">
     ${card('Doctor', table(['', 'Check', 'Detail', 'Fix'], checks.map(c => H`<tr><td>${dot(c.ok ? 'healthy' : c.level === 'warning' || c.level === 'warn' ? 'degraded' : 'unreachable')}</td><td>${c.name}</td><td class="small">${c.detail || ''}</td><td class="small">${c.fix ? H`<code>${c.fix}</code>` : ''}</td></tr>`), doctor ? 'No checks.' : 'Doctor endpoint unavailable.'), { cls: 'c8', actions: H`<button class="sm" data-act="refresh">Re-run</button>` })}
     ${card('Resource usage', kv([['Gateway RSS', bytes(m.rss_bytes)], ['CPU', m.cpu_percent != null ? Number(m.cpu_percent).toFixed(1) + '%' : null], ['Audit DB', bytes(m.db_bytes)], ['Auth DB', bytes(m.auth_db_bytes)], ['Job logs', bytes(m.job_logs_bytes)], ['Probe cost', m.probe_cost_ms != null ? m.probe_cost_ms + ' ms' : null]]), 'c4')}

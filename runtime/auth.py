@@ -678,9 +678,13 @@ class AuthStore:
             "scope": scope_string(scopes),
         }
         with self._lock, self._connect() as db:
-            db.execute("INSERT INTO access_tokens(jti,client_id,kind,scope,resource,created_at,expires_at,family_id) VALUES(?,?,?,?,?,?,?,?)",
-                       (jti, client_id, kind, claims["scope"], resource, now, exp, family_id))
+            self._store_access_token(db, claims, kind=kind, family_id=family_id)
         return jwt.encode(claims, self.signing_key, algorithm="HS256"), claims
+
+    def _store_access_token(self, db, claims: dict[str, Any], *, kind: str = "oauth", family_id: str | None = None) -> None:
+        """Persist access-token revocation state in the caller's transaction."""
+        db.execute("INSERT INTO access_tokens(jti,client_id,kind,scope,resource,created_at,expires_at,family_id) VALUES(?,?,?,?,?,?,?,?)",
+                   (claims["jti"], claims["client_id"], kind, claims["scope"], claims["aud"], claims["iat"], claims["exp"], family_id))
 
     def verify_access_token(self, token: str) -> Principal:
         try:
@@ -711,32 +715,66 @@ class AuthStore:
         return token, family
 
     def rotate_refresh_token(self, token: str, *, client_id: str, resource: str,
-                             requested_scope: str | None = None) -> tuple[str, set[str], str]:
-        """Validate + rotate. Reuse of a rotated token revokes the whole family."""
+                             requested_scope: str | None = None) -> tuple[str, str, set[str], str, dict[str, Any]]:
+        """Atomically rotate refresh/access tokens; reuse revokes the whole family."""
         h = sha256_hex(token)
+        reused_family = None
+        new_token = access = None
+        claims: dict[str, Any] | None = None
+        scopes: set[str] = set()
+        family = ""
         with self._lock, self._connect() as db:
+            # Serialize refreshes across processes as well as threads. This prevents a
+            # concurrent replay from committing family revocation before the winning
+            # request has inserted its successor token.
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM refresh_tokens WHERE token_hash=?", (h,)).fetchone()
             if not row:
                 raise AuthError("invalid_grant", "unknown refresh token")
             if row["revoked_at"] is not None:
                 raise AuthError("invalid_grant", "refresh token revoked")
             if row["rotated_at"] is not None:
-                db.execute("UPDATE refresh_tokens SET revoked_at=? WHERE family_id=? AND revoked_at IS NULL", (time.time(), row["family_id"]))
-                db.execute("UPDATE access_tokens SET revoked_at=? WHERE family_id=? AND revoked_at IS NULL", (time.time(), row["family_id"]))
-                self.record_event("refresh_token_reuse_detected", row["client_id"], detail={"family": row["family_id"]})
-                raise AuthError("invalid_grant", "refresh token reuse detected; grant revoked")
-            if row["expires_at"] < time.time():
-                raise AuthError("invalid_grant", "refresh token expired")
-            if row["client_id"] != client_id:
-                raise AuthError("invalid_grant", "refresh token belongs to a different client")
-            if row["resource"] != resource:
-                raise AuthError("invalid_target", "refresh token was issued for a different resource")
-            scopes = normalize_scopes(row["scope"])
-            if requested_scope and not normalize_scopes(requested_scope) <= scopes:
-                raise AuthError("invalid_scope", "refresh cannot widen the granted scope")
-            db.execute("UPDATE refresh_tokens SET rotated_at=? WHERE token_hash=?", (time.time(), h))
-        new_token, family = self.issue_refresh_token(client_id=client_id, resource=resource, scopes=scopes, family_id=row["family_id"])
-        return new_token, scopes, family
+                reused_family = row["family_id"]
+                revoked_at = time.time()
+                db.execute("UPDATE refresh_tokens SET revoked_at=? WHERE family_id=? AND revoked_at IS NULL", (revoked_at, reused_family))
+                db.execute("UPDATE access_tokens SET revoked_at=? WHERE family_id=? AND revoked_at IS NULL", (revoked_at, reused_family))
+            else:
+                if row["expires_at"] < time.time():
+                    raise AuthError("invalid_grant", "refresh token expired")
+                if row["client_id"] != client_id:
+                    raise AuthError("invalid_grant", "refresh token belongs to a different client")
+                if row["resource"] != resource:
+                    raise AuthError("invalid_target", "refresh token was issued for a different resource")
+                granted_scopes = normalize_scopes(row["scope"])
+                if requested_scope and not normalize_scopes(requested_scope) <= granted_scopes:
+                    raise AuthError("invalid_scope", "refresh cannot widen the granted scope")
+                scopes = normalize_scopes(requested_scope) if requested_scope else granted_scopes
+                now = time.time()
+                updated = db.execute("UPDATE refresh_tokens SET rotated_at=? WHERE token_hash=? AND rotated_at IS NULL AND revoked_at IS NULL",
+                                     (now, h))
+                if updated.rowcount != 1:
+                    # BEGIN IMMEDIATE makes this defensive branch unexpected, but never
+                    # issue a successor if another writer consumed this token.
+                    raise AuthError("invalid_grant", "refresh token already used")
+                new_token = "lbr_" + secrets.token_urlsafe(40)
+                family = row["family_id"]
+                db.execute("INSERT INTO refresh_tokens(token_hash,family_id,client_id,scope,resource,created_at,expires_at) VALUES(?,?,?,?,?,?,?)",
+                           (sha256_hex(new_token), family, client_id, scope_string(scopes), resource, now, now + self.refresh_ttl))
+
+                issued_at = int(now)
+                claims = {
+                    "iss": self.issuer_for(resource), "sub": client_id, "aud": resource,
+                    "iat": issued_at, "exp": issued_at + self.access_ttl,
+                    "jti": secrets.token_urlsafe(16), "typ": "access", "client_id": client_id,
+                    "scope": scope_string(scopes),
+                }
+                access = jwt.encode(claims, self.signing_key, algorithm="HS256")
+                self._store_access_token(db, claims, family_id=family)
+        if reused_family is not None:
+            self.record_event("refresh_token_reuse_detected", row["client_id"], detail={"family": reused_family})
+            raise AuthError("invalid_grant", "refresh token reuse detected; grant revoked")
+        assert new_token is not None and access is not None and claims is not None
+        return new_token, access, scopes, family, claims
 
     def revoke_token(self, token: str, hint: str | None = None) -> bool:
         """RFC 7009: revoke a refresh token (and its family) or an access token."""
