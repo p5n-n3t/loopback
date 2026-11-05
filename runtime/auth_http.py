@@ -101,11 +101,12 @@ def forbidden_scope(ctx: AppContext, request: Request, required: str, descriptio
                         headers={"WWW-Authenticate": www_authenticate(ctx, request, error="insufficient_scope", scope=required, description=description), **NO_STORE})
 
 
-def oauth_error(error: str, description: str = "", status: int = 400) -> JSONResponse:
+def oauth_error(error: str, description: str = "", status: int = 400,
+                headers: dict[str, str] | None = None) -> JSONResponse:
     body: dict[str, Any] = {"error": error}
     if description:
         body["error_description"] = description
-    return JSONResponse(body, status_code=status, headers=NO_STORE)
+    return JSONResponse(body, status_code=status, headers={**NO_STORE, **(headers or {})})
 
 
 # --------------------------------------------------------------------------- HTML
@@ -460,7 +461,7 @@ def routes(ctx: AppContext) -> list[Route]:
     async def token(request: Request) -> Response:
         ip = client_ip(request)
         if not ctx.auth.limiter.allow("token", ip, 120, 60):
-            return oauth_error("invalid_request", "rate limited", 429)
+            return oauth_error("invalid_request", "rate limited", 429, headers={**NO_STORE, "Retry-After": "60"})
         form = await request.form()
         grant_type = str(form.get("grant_type") or "")
         try:
@@ -506,16 +507,13 @@ def routes(ctx: AppContext) -> list[Route]:
                 return oauth_error("invalid_request", "refresh_token is required")
             requested = str(form.get("scope") or "")
             try:
-                new_refresh, scopes, family = ctx.auth.rotate_refresh_token(refresh, client_id=client_id, resource=resource,
-                                                                          requested_scope=requested)
+                new_refresh, access, scopes, family, claims = ctx.auth.rotate_refresh_token(
+                    refresh, client_id=client_id, resource=resource, requested_scope=requested)
             except AuthError as exc:
                 if exc.error != "invalid_scope":
                     ctx.auth.limiter.failure("token", ip, threshold=30)
                 ctx.auth.record_event("oauth_refresh_failed", client_id, ip, {"error": exc.error})
                 return oauth_error(exc.error, exc.description)
-            if requested:
-                scopes = normalize_scopes(requested)
-            access, claims = ctx.auth.issue_access_token(client_id=client_id, resource=resource, scopes=scopes, family_id=family)
             ctx.auth.touch_client(client_id)
             ctx.auth.record_event("oauth_tokens_issued", client_id, ip, {"grant": "refresh_token"})
             return JSONResponse({"access_token": access, "token_type": "Bearer", "expires_in": ctx.auth.access_ttl,

@@ -108,7 +108,9 @@ class AuditStore:
         cutoff = time.time() - max(60, int(since_seconds))
         with self._connect() as db:
             total = db.execute("SELECT COUNT(*) c FROM audit_events WHERE ts>=?", (cutoff,)).fetchone()["c"]
-            failures = db.execute("SELECT COUNT(*) c FROM audit_events WHERE ts>=? AND status!='ok'", (cutoff,)).fetchone()["c"]
+            failures = db.execute("SELECT COUNT(*) c FROM audit_events WHERE ts>=? "
+                                  "AND status NOT IN ('ok','received','policy_allowed','ssh_dispatch_attempted','completed')",
+                                  (cutoff,)).fetchone()["c"]
             top = db.execute(
                 "SELECT tool,COUNT(*) c FROM audit_events WHERE ts>=? GROUP BY tool ORDER BY c DESC LIMIT 10", (cutoff,)
             ).fetchall()

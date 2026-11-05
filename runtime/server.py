@@ -18,6 +18,7 @@ import contextvars
 import functools
 import inspect
 import json
+import logging
 import os
 import signal
 import socket
@@ -52,6 +53,8 @@ from documents import DocumentTools
 from jobs import QuotaExceeded, shell_argv
 from policy import ApprovalRequired, PolicyError
 from redaction import redact_text
+from traces import TraceStore
+import traces_api
 from url_policy import UrlPolicyError
 from url_policy import from_policy as url_policy_from
 from version import VERSION
@@ -69,14 +72,42 @@ FLEET = CTX.fleet
 CFG = CTX.cfg_dir
 STARTED_AT = CTX.started_at
 WINDOWS = sys.platform.startswith("win")
+CTX.traces = TraceStore(CFG)
+TRACES = CTX.traces
+MCP_TRACE = contextvars.ContextVar("mcp_trace", default=None)
+
+
+def _trace_stage(stage, **detail):
+    trace = MCP_TRACE.get()
+    if trace is not None:
+        trace["stage"] = stage
+        try:
+            TRACES.stage(trace["receipt_id"], stage, detail)
+        except Exception as exc:
+            # Telemetry failure must not change command semantics or leak arguments.
+            logging.getLogger(__name__).error("trace persistence failed (%s)", type(exc).__name__)
+
+
+def _trace_return(tool, result):
+    # Only interpret known execution result schemas. Returning a job ID or a
+    # generic object is not proof that a remote operation completed.
+    if tool == "execute" and isinstance(result, dict):
+        code = result.get("returncode")
+        stage = "timed_out" if result.get("timed_out") else "completed" if code == 0 else "nonzero_exit" if isinstance(code, int) else "handler_completed"
+        _trace_stage(stage, returncode=code, duration_ms=result.get("duration_ms", 0))
+    else:
+        _trace_stage("handler_completed")
 
 SSH_RECEIPT = contextvars.ContextVar("ssh_receipt", default=None)
 
 
 def _ssh_stage(stage, **detail):
+    _trace_stage(stage, **detail)
     receipt = SSH_RECEIPT.get()
     if receipt is not None:
+        principal = CURRENT_PRINCIPAL.get()
         AUDIT.record("ssh_execute", stage, target=receipt["target"], principal=_principal_name(),
+                     principal_kind=principal.kind if principal else None,
                      detail={"receipt_id": receipt["id"], **detail})
         receipt["stage"] = stage
 
@@ -201,21 +232,47 @@ def meta(scope: str, category: str, *, target: str = "local", network: bool = Fa
             @functools.wraps(fn)
             async def awrapper(*args, **kwargs):
                 try:
-                    return await fn(*args, **kwargs)
+                    if fn.__name__ != "ssh_execute":
+                        _trace_stage("handler_started")
+                    result = await fn(*args, **kwargs)
+                    if fn.__name__ != "ssh_execute":
+                        _trace_return(fn.__name__, result)
+                    return result
+                except asyncio.CancelledError:
+                    if fn.__name__ != "ssh_execute":
+                        _trace_stage("cancelled")
+                    raise
                 except ToolError:
+                    if fn.__name__ != "ssh_execute":
+                        _trace_stage("execution_error")
                     raise
                 except _ANTICIPATED as exc:
+                    if fn.__name__ != "ssh_execute":
+                        _trace_stage("approval_required" if isinstance(exc, ApprovalRequired) else
+                                     "policy_denied" if isinstance(exc, PolicyError) else "execution_error", error_type=type(exc).__name__)
                     raise _translate(exc) from exc
+                except Exception as exc:
+                    _trace_stage("execution_error", error_type=type(exc).__name__)
+                    raise
             return awrapper
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             try:
-                return fn(*args, **kwargs)
+                _trace_stage("handler_started")
+                result = fn(*args, **kwargs)
+                _trace_return(fn.__name__, result)
+                return result
             except ToolError:
+                _trace_stage("execution_error")
                 raise
             except _ANTICIPATED as exc:
+                _trace_stage("approval_required" if isinstance(exc, ApprovalRequired) else
+                             "policy_denied" if isinstance(exc, PolicyError) else "execution_error", error_type=type(exc).__name__)
                 raise _translate(exc) from exc
+            except Exception as exc:
+                _trace_stage("execution_error", error_type=type(exc).__name__)
+                raise
         return wrapper
     return deco
 
@@ -732,12 +789,15 @@ async def ssh_execute(target: str, command: str, cwd: str | None = None, timeout
     except PolicyError:
         _ssh_stage("policy_denied")
         raise
+    except asyncio.CancelledError:
+        _ssh_stage("cancelled", remote_outcome="unknown")
+        raise
     except Exception as exc:
         _ssh_stage("execution_error", error_type=type(exc).__name__)
         raise
     code = result["returncode"]
     outcome = "timed_out" if result["timed_out"] else "ssh_exit_255" if code == 255 else "nonzero_exit" if code else "completed"
-    _ssh_stage(outcome, returncode=code)
+    _ssh_stage(outcome, returncode=code, duration_ms=result.get("duration_ms", 0))
     if receipt := SSH_RECEIPT.get():
         result["receipt_id"] = receipt["id"]
     return result
@@ -1040,9 +1100,11 @@ class McpGate:
         if scope.get("type") != "http" or scope.get("path") not in {"/mcp", "/mcp/"} or scope.get("method") != "POST":
             return await self.wrapped(scope, receive, send)
         token = SSH_RECEIPT.set(None)
+        trace_token = MCP_TRACE.set(None)
         try:
             return await self._handle(scope, receive, send)
         finally:
+            MCP_TRACE.reset(trace_token)
             SSH_RECEIPT.reset(token)
 
     async def _handle(self, scope, receive, send):
@@ -1050,6 +1112,8 @@ class McpGate:
         more = True
         while more:
             message = await receive()
+            if message.get("type") == "http.disconnect":
+                return
             if message.get("type") != "http.request":
                 continue
             chunks.append(message.get("body", b""))
@@ -1062,7 +1126,7 @@ class McpGate:
             if not used:
                 used = True
                 return {"type": "http.request", "body": body, "more_body": False}
-            return {"type": "http.disconnect"}
+            return await receive()
 
         principal: Principal | None = scope.get("state", {}).get("principal")
         tool = "mcp"
@@ -1080,27 +1144,52 @@ class McpGate:
             if method == "tools/call" and isinstance(params, dict):
                 target = str(params.get("name") or "") or None
                 tool = target or method
+                arguments = params.get("arguments")
+                arguments = arguments if isinstance(arguments, dict) else {}
+                from ssh_targets import NAME_RE
+                alias = arguments.get("target") if tool == "ssh_execute" else arguments.get("node")
+                alias = alias if isinstance(alias, str) and NAME_RE.fullmatch(alias) else None
+                if TOOL_META.get(tool, {}).get("target") == "local":
+                    alias = "local"
+                receipt_id = uuid.uuid4().hex
+                trace_id = None
+                meta_data = params.get("_meta")
+                requested_trace = meta_data.get("loopback/trace_id") if isinstance(meta_data, dict) else None
+                try:
+                    trace_id = TRACES.attach_gateway(_owner_key(), tool, alias, receipt_id, trace_id=requested_trace)
+                    if trace_id is None:
+                        trace_id = TRACES.attach_gateway(_owner_key(), tool, alias, receipt_id)
+                except Exception as exc:
+                    logging.getLogger(__name__).error("trace creation failed (%s)", type(exc).__name__)
+                MCP_TRACE.set({"receipt_id": receipt_id, "trace_id": trace_id, "stage": "received"})
+                original_send = send
+
+                async def receipt_send(message):
+                    if message["type"] == "http.response.start":
+                        headers = [*message.get("headers", []), (b"x-loopback-receipt", receipt_id.encode())]
+                        if trace_id:
+                            headers.append((b"x-loopback-trace", trace_id.encode()))
+                        message = {**message, "headers": headers}
+                    await original_send(message)
+
+                send = receipt_send
+                try:
+                    trace_timeout = max(1, min(int(arguments.get("timeout") or default_timeout()), 86400))
+                except (TypeError, ValueError, OverflowError):
+                    trace_timeout = default_timeout()
                 if tool == "ssh_execute":
-                    from ssh_targets import NAME_RE
-                    arguments = params.get("arguments")
-                    alias = arguments.get("target") if isinstance(arguments, dict) else None
-                    receipt = {"id": uuid.uuid4().hex, "target": alias if isinstance(alias, str) and NAME_RE.fullmatch(alias) else None}
+                    receipt = {"id": receipt_id, "target": alias}
                     SSH_RECEIPT.set(receipt)
-                    original_send = send
-
-                    async def receipt_send(message):
-                        if message["type"] == "http.response.start":
-                            message = {**message, "headers": [*message.get("headers", []), (b"x-loopback-receipt", receipt["id"].encode())]}
-                        await original_send(message)
-
-                    send = receipt_send
-                    _ssh_stage("received")
+                    _ssh_stage("received", timeout_seconds=trace_timeout)
+                else:
+                    _trace_stage("received", timeout_seconds=trace_timeout)
                 try:
                     POLICY.check_tool(tool)
                 except PolicyError as exc:
                     if tool == "ssh_execute":
                         _ssh_stage("policy_denied")
                     else:
+                        _trace_stage("policy_denied")
                         AUDIT.record(tool, "policy_denied", target=target, principal=principal.display if principal else None,
                                  principal_kind=principal.kind if principal else None)
                     response = JSONResponse({"jsonrpc": "2.0", "id": payload_id, "error": {"code": -32001, "message": str(exc)}}, status_code=200)
@@ -1110,6 +1199,7 @@ class McpGate:
                     if tool == "ssh_execute":
                         _ssh_stage("insufficient_scope", required_scope=required)
                     else:
+                        _trace_stage("insufficient_scope", required_scope=required)
                         AUDIT.record(tool, "insufficient_scope", target=target, principal=principal.display, principal_kind=principal.kind,
                                  detail={"required_scope": required, "granted_scopes": sorted(principal.scopes)})
                     request = Request(scope)
@@ -1137,8 +1227,17 @@ class McpGate:
         error = None
         try:
             await self.wrapped(scope, replay_receive, wrapped_send)
+        except asyncio.CancelledError:
+            error = "cancelled"
+            if receipt := SSH_RECEIPT.get():
+                if receipt.get("stage") not in {"completed", "nonzero_exit", "ssh_exit_255", "timed_out", "execution_error", "policy_denied", "approval_required", "cancelled"}:
+                    _ssh_stage("cancelled", remote_outcome="unknown")
+            elif (MCP_TRACE.get() or {}).get("stage") not in {"handler_completed", "execution_error", "policy_denied", "approval_required", "cancelled"}:
+                _trace_stage("cancelled")
+            raise
         except Exception as exc:
             error = type(exc).__name__
+            _trace_stage("execution_error", error_type=error)
             raise
         finally:
             h = _headers(scope)
@@ -1146,6 +1245,8 @@ class McpGate:
                 if receipt.get("stage") == "received":
                     _ssh_stage("handler_not_observed", http_status=status_code)
             else:
+                if (MCP_TRACE.get() or {}).get("stage") == "received":
+                    _trace_stage("http_error" if status_code >= 400 else "handler_not_observed", http_status=status_code)
                 AUDIT.record(tool, "ok" if error is None and status_code < 400 else (error or f"http_{status_code}"),
                          duration_ms=int((time.time() - started) * 1000), target=target,
                          detail={"user_agent": h.get("user-agent", "")[:200]},
@@ -1220,7 +1321,7 @@ mcp_chain = TokenGate(
         allow_origins=_allowed_origins(),
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
-        expose_headers=["Mcp-Session-Id", "WWW-Authenticate"],
+        expose_headers=["Mcp-Session-Id", "WWW-Authenticate", "X-Loopback-Receipt", "X-Loopback-Trace"],
     )
 )
 
@@ -1254,6 +1355,7 @@ async def lifespan(app: Starlette):
                 AUDIT.record("ingress.start", "error", detail={"error": str(exc)[:300]})
         if CTX.maintenance is not None and hasattr(CTX.maintenance, "run_forever"):
             tasks.append(asyncio.create_task(CTX.maintenance.run_forever(stop)))
+        tasks.append(asyncio.create_task(traces_api.reconcile_forever(CTX, stop)))
         AUDIT.record("startup", "ok", detail={"version": VERSION, "sandbox": CTX.sandbox.backend.name})
         try:
             yield
@@ -1270,6 +1372,7 @@ async def lifespan(app: Starlette):
 _routes: list = []
 _routes += auth_http.routes(CTX)
 _routes += admin_api.routes(CTX)
+_routes += traces_api.routes(CTX)
 _routes += _optional_routes("fabric_api")
 _routes += _optional_routes("maintenance_api")
 _routes += _optional_routes("dashboard")

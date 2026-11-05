@@ -86,6 +86,15 @@ class PolicyTests(unittest.TestCase):
 
 
 class AuditTests(unittest.TestCase):
+    def test_successful_receipt_stages_are_not_failures(self):
+        with tempfile.TemporaryDirectory() as td:
+            a = AuditStore(Path(td))
+            for stage in ("received", "policy_allowed", "ssh_dispatch_attempted", "completed"):
+                a.record("ssh_execute", stage, detail={"receipt_id": "a" * 32})
+            self.assertEqual(a.stats()["failures"], 0)
+            a.record("ssh_execute", "cancelled", detail={"receipt_id": "b" * 32})
+            self.assertEqual(a.stats()["failures"], 1)
+
     def test_record_and_stats(self):
         with tempfile.TemporaryDirectory() as td:
             a = AuditStore(Path(td))

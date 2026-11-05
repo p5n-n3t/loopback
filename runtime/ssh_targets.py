@@ -25,6 +25,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import shutil
 import socket
 import subprocess
@@ -42,6 +43,63 @@ PROBE_STATUSES = ("healthy", "auth_failed", "unreachable", "degraded", "error")
 CONTAINER_VIRT = {"docker", "podman", "lxc", "lxc-libvirt", "systemd-nspawn", "openvz", "wsl", "rkt", "proot", "pouch"}
 TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 TAILSCALE_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
+
+
+async def _stop_process_group(proc: asyncio.subprocess.Process, grace_seconds: float = 1.0) -> None:
+    """Stop and reap the local SSH process group, escalating if it ignores SIGTERM."""
+    if proc.returncode is not None:
+        return
+    try:
+        if os.name == "nt":
+            proc.terminate()
+        else:
+            os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace_seconds)
+    except TimeoutError:
+        try:
+            if os.name == "nt":
+                proc.kill()
+            else:
+                os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        await proc.wait()
+
+
+async def _settle_readers(*tasks: asyncio.Task[bytes], timeout: float = 5.0) -> tuple[bytes, ...]:
+    """Collect stream readers or cancel them when a child leaves inherited pipes open."""
+    try:
+        return tuple(await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout))
+    except TimeoutError:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        return tuple(b"" for _ in tasks)
+
+
+async def _finish_cleanup(task: asyncio.Task[Any]) -> None:
+    """Wait for cleanup to finish even if the caller receives another cancel."""
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # Preserve cancellation for the caller, but do not abandon the child.
+            continue
+    # Surface an unexpected cleanup exception rather than silently losing it.
+    task.result()
 
 _AUTH_MARKERS = ("permission denied", "publickey", "authentication failed", "too many authentication failures",
                  "no supported authentication methods")
@@ -593,24 +651,24 @@ class SSHTargetStore:
         out_task = asyncio.create_task(drain(proc.stdout))
         err_task = asyncio.create_task(drain(proc.stderr))
         timed_out = False
+
+        async def cleanup() -> None:
+            # This limits abandoned local clients; it cannot establish whether
+            # a remote command already ran.
+            await _stop_process_group(proc)
+            await _settle_readers(out_task, err_task)
+
         try:
-            await asyncio.wait_for(proc.wait(), timeout=timeout)
-        except TimeoutError:
-            timed_out = True
             try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=5)
+                await asyncio.wait_for(proc.wait(), timeout=timeout)
             except TimeoutError:
-                pass
-        try:
-            stdout, stderr = await asyncio.wait_for(asyncio.gather(out_task, err_task), timeout=5)
-        except TimeoutError:
-            out_task.cancel()
-            err_task.cancel()
-            stdout, stderr = b"", b""
+                timed_out = True
+                await _stop_process_group(proc)
+            stdout, stderr = await _settle_readers(out_task, err_task)
+        except asyncio.CancelledError:
+            cleanup_task = asyncio.create_task(cleanup())
+            await _finish_cleanup(cleanup_task)
+            raise
         return {
             "target": name,
             "command": command,
