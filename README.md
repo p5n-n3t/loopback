@@ -83,9 +83,10 @@ Mention the machine, the folder or resource, and the limits of the task.
 
 Loopback does not require a subscription. The chat or IDE still needs support
 for custom MCP servers. **Claude Free** includes one remote custom connector.
-**ChatGPT Free** has no documented custom MCP entitlement. ChatGPT Pro has
-read/fetch access in developer mode, and Business and Enterprise/Edu have full
-MCP support where enabled. See [client and account requirements](docs/CLIENT-CAPABILITIES.md).
+In **ChatGPT Web**, check whether your account can add a custom MCP server
+under Plugins and use it in the intended conversation. The Plugins directory
+is available across plans, while a specific connector's tools depend on the
+account and conversation surface. See [client and account requirements](docs/CLIENT-CAPABILITIES.md).
 
 ### Use responsibly
 

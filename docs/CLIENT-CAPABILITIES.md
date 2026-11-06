@@ -7,7 +7,7 @@ Actual connector access depends on your client, workspace, and rollout.
 
 | Client | Official documentation checked | Consequence |
 | --- | --- | --- |
-| ChatGPT Web | OpenAI documents Pro read/fetch access in developer mode and full MCP for Business and Enterprise/Edu where enabled. | Free and Plus do not have documented custom MCP access. Read/fetch access alone does not establish shell, write, or SSH availability. |
+| ChatGPT Web | The Plugins directory is available across plans. OpenAI documents **Add custom MCP server** in Plugins, and separately documents plan restrictions for developer mode. | Check the actual account and the intended Chat or Work surface. Seeing the add option, completing OAuth, and successfully invoking a tool are separate checks. |
 | Claude | Anthropic documents remote custom connectors on Free, Pro, Max, Ultra, Team, and Enterprise. Free includes one custom connector. | Anthropic must be able to reach the remote endpoint. Team and Enterprise may require an authorized admin. |
 | Perplexity | Official MCP documentation describes external connectors on Pro, Max, and Enterprise and distinguishes client-side MCP from its own provider tools. | Do not promise universal free-account support or assume every client imports the same server primitives. Verify the actual product surface. |
 | VS Code or your own MCP client | VS Code supports configured HTTP MCP servers. A compatible local MCP client can connect directly over localhost. | The model or agent used by that client has its own plan, limits, and permissions. |
@@ -15,6 +15,7 @@ Actual connector access depends on your client, workspace, and rollout.
 Sources:
 
 - [OpenAI custom MCP connections](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt)
+- [OpenAI Plugins availability](https://help.openai.com/en/articles/20001256-plugins-in-chatgpt) and [custom MCP setup](https://developers.openai.com/plugins/quickstart)
 - [Claude remote custom connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
 - [VS Code MCP servers](https://code.visualstudio.com/docs/agent-customization/mcp-servers)
 - [Perplexity MCP tools and client behavior](https://www.perplexity.ai/en-GB/hub/blog/mcp-tools)
@@ -32,6 +33,12 @@ tests, or edit authorized files. This covers parts of a coding workflow.
 ChatGPT Web still provides the model picker, thinking controls, tool
 approvals, and usage limits. Codex CLI has its own execution environment,
 model and reasoning controls, and allowances.
+
+The **Add custom MCP server** entry is a documented feature of the Plugins
+interface. OpenAI's quickstart demonstrates a read-only tool in **Work**.
+If the entry appears on your Free account, confirm authorization and try a
+read-only call in ordinary **Chat** before relying on that workflow. We have
+not verified full Loopback tool access in ordinary Chat on all plans.
 
 OpenAI documents unlimited everyday text chat for Free and Go subject to
 abuse safeguards. Tools have separate limits, and custom MCP access is a
