@@ -23,7 +23,7 @@ Give an MCP client scoped access to files, shell commands, jobs, terminals, and 
 | Work on your machine from an MCP client | File and document tools, shell commands, background jobs, and persistent terminals on supported hosts. [Tool reference](docs/TOOLS.md) |
 | Manage several machines through one gateway | Register Loopback nodes or plain SSH targets and set a separate policy for each. [Fleet and SSH](docs/FLEET.md) |
 | Control what a client can access | OAuth 2.1 with PKCE or revocable API tokens, filesystem roots, tool permissions, command approvals, and OS sandboxing where available. [Authentication](docs/AUTHENTICATION.md) · [Permissions](docs/PERMISSIONS.md) |
-| Connect from another network | Choose Tailscale Serve for private tailnet access, Tailscale Funnel or Cloudflare Tunnel for HTTPS ingress, or a reverse proxy you manage. [Deployment](docs/DEPLOYMENT.md) |
+| Connect from another network | Use Tailscale Serve for private tailnet access, Tailscale Funnel, Cloudflare Tunnel, or a fixed ngrok hostname for public HTTPS, or a reverse proxy you manage. [Deployment](docs/DEPLOYMENT.md) · [ngrok setup](docs/TUNNEL-PROVIDERS.md#configure-ngrok) |
 | Diagnose failed or interrupted calls | Inspect gateway receipts, policy decisions, dispatch, and exit status. Export redacted JSON or Markdown from Execution traces. [Execution traces](docs/EXECUTION-TRACES.md) |
 
 ## Install
