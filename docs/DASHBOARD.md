@@ -53,6 +53,9 @@ one step later from its own section without going through the wizard again.
 - **Jobs** — background job list, output, stop.
 - **Logs & diagnostics** — `server`/`cloudflared`/`tailscale` log tails,
   `doctor`-equivalent checks.
+- **Execution traces** — filter calls by outcome, target, tool, time, or
+  receipt. Open a trace to inspect its timeline or download a redacted
+  JSON or Markdown report. See [Execution traces](EXECUTION-TRACES.md).
 - **Security** — policy profile, approvals queue, sandbox self-test,
   session revocation.
 - **Backup & recovery** — trigger `backup`/`restore`, view rollback

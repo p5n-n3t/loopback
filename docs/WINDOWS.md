@@ -6,13 +6,12 @@ you rely on it for anything sensitive.
 
 ## Installing
 
-```powershell
-irm https://raw.githubusercontent.com/p5n-n3t/loopback/main/install.ps1 | iex
-```
-
-`install.ps1` offers to install Python via `winget` if no suitable Python
-is found, then delegates to the same `cli.py install` every platform uses.
-See [INSTALL.md](INSTALL.md) for shared flags.
+Follow the [Windows checkout instructions](INSTALL.md#windows). Use a
+regular PowerShell session and Python 3.11+ with `venv`. If PowerShell's
+execution policy blocks a script you have reviewed, see the system's
+execution policy with `Get-ExecutionPolicy -List` and follow your
+organization's policy. On a personal machine, a process-scoped
+`Set-ExecutionPolicy -Scope Process RemoteSigned` can be used where allowed.
 
 ## No OS sandbox for shell commands
 
