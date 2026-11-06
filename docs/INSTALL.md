@@ -1,62 +1,52 @@
-# Installation
+---
+title: Install Loopback
+description: Install the current Loopback MCP gateway from source on Linux, macOS, or Windows.
+keywords: [mcp installer, linux, macos, windows, python]
+---
 
-Three equivalent install paths all end up running the same cross-platform
-implementation: `python3 runtime/cli.py install`.
+# Install Loopback
+
+Use the current source checkout. Install as the account that should run Loopback.
+Start with local ingress and verify the gateway before enabling a tunnel.
+
+> [!IMPORTANT]
+> The current runtime is on `main`. The older GitHub release does not contain
+> the current installer assets, and `loopback-mcp` is unavailable on the public
+> npm registry. The release and npm installers in this repo are packaging
+> options for a future published distribution.
 
 ## Linux and macOS
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/p5n-n3t/loopback/main/install.sh | bash
-```
-
-`install.sh` detects your package manager (`apt`, `dnf`, `yum`, `zypper`,
-`pacman`, `apk` on Linux; `brew` on macOS) to install a Python 3.11+
-interpreter if needed, creates a private virtualenv under the config
-directory, and then delegates everything else to `cli.py install`. It
-accepts the same flags as `loopback install` (below), e.g.:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/p5n-n3t/loopback/main/install.sh \
-  | bash -s -- --non-interactive --ingress local
-```
-
-`LOOPBACK_VERSION` and `LOOPBACK_CONFIG_DIR` environment variables are
-honored by the installer the same way they are by the running server (see
-[CONFIGURATION.md](CONFIGURATION.md)).
-
-## Windows
-
-```powershell
-irm https://raw.githubusercontent.com/p5n-n3t/loopback/main/install.ps1 | iex
-```
-
-`install.ps1` offers to install Python via `winget` if none is found, then
-delegates to `cli.py install`. Windows has no OS sandbox backend for
-arbitrary shell commands and no persistent-PTY terminal support; autostart
-uses a Task Scheduler entry at logon with the current user's rights. See
-[WINDOWS.md](WINDOWS.md).
-
-## npm wrapper (any platform with Node 18+)
-
-```bash
-npx loopback-mcp install
-```
-
-Downloads the release tarball (`loopback-v<version>.tar.gz`) and its
-`SHA256SUMS` from the matching GitHub release over HTTPS (redirects
-followed, capped at 10, non-HTTPS refused), **verifies the SHA-256 before
-extracting anything**, extracts with the system `tar`, then runs
-`install.sh`/`install.ps1` for you. No npm dependencies are installed.
-`LOOPBACK_SOURCE_DIR` points it at a local checkout instead of downloading
-a release (mainly useful for testing a checkout before it's tagged).
-
-## From a source checkout
+Install Git, Bash, and Python 3.11+ with `venv` and `ensurepip`.
+For example, on Debian 12 or Ubuntu 24.04, install `git`, `python3`,
+`python3-venv`, `curl`, and `tar` using your package manager. On macOS,
+use a Python installation that includes `venv`, such as Homebrew Python.
+Run from a normal terminal as your own user.
 
 ```bash
 git clone https://github.com/p5n-n3t/loopback.git
 cd loopback
 ./install.sh --non-interactive --ingress local
 ```
+
+Run `./install.sh --ingress local` for interactive prerequisite prompts.
+The installer creates a dedicated virtual environment in the Loopback
+configuration directory and registers a user service where supported.
+
+## Windows
+
+Install Git and Python 3.11+ from python.org or via `winget`. Open a normal
+PowerShell window. Run the script from the checkout so it uses local source.
+
+```powershell
+git clone https://github.com/p5n-n3t/loopback.git
+Set-Location loopback
+.\install.ps1 --non-interactive --ingress local
+```
+
+Omit `--non-interactive` to allow the installer to offer Python installation
+through `winget` when available. If PowerShell blocks the script, see the
+[Windows guide](WINDOWS.md#installing).
 
 ## Common install flags
 
@@ -66,7 +56,7 @@ it):
 | Flag | Effect |
 |---|---|
 | `--non-interactive` | No prompts; requires the other flags needed to fully configure ingress/profile up front. |
-| `--ingress {local,tailscale,cloudflare,both}` | Ingress to configure immediately. |
+| `--ingress {local,tailscale,cloudflare,ngrok,both}` | Ingress to configure immediately. |
 | `--host`, `--port` | Override the listen address. |
 | `--tailscale-mode {serve,funnel}` | See [TAILSCALE.md](TAILSCALE.md). |
 | `--cloudflare-token-file`, `--cloudflare-tunnel-id` | See [CLOUDFLARE.md](CLOUDFLARE.md). |
@@ -78,11 +68,21 @@ it):
 
 ## After installing
 
+Save the generated dashboard username and password and the separate OAuth
+connector setup key in a password manager. The dashboard credentials sign
+you in to the admin UI. The connector setup key approves a client on
+Loopback's OAuth consent page. See [Authentication](AUTHENTICATION.md).
+
 ```bash
 loopback status
 loopback url
 loopback dashboard --open
+loopback doctor --deep
 ```
+
+Open a new terminal if the launcher directory was just added to your PATH.
+The default MCP URL is `http://127.0.0.1:2026/mcp`. For remote clients, see
+[Deployment](DEPLOYMENT.md) and [Web agents](WEB-AGENTS.md).
 
 The `bin/loopback` wrapper resolves the config directory the same way the
 server does (see [CONFIGURATION.md](CONFIGURATION.md)) and locates

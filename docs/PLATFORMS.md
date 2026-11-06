@@ -1,20 +1,19 @@
 # Supported platforms
 
-Loopback runs on Python 3.11+ on Linux, macOS, and Windows. CI
-(`.github/workflows/ci.yml`) exercises Python 3.11 and 3.13 on all three,
-plus install smoke tests on a spread of Linux distributions.
+Loopback targets Linux, macOS, and Windows with Python 3.11+. The current
+[GitHub CI workflow](../.github/workflows/ci.yml) runs on Ubuntu with Python
+3.11 and 3.13. The table describes host capabilities. The Ubuntu test
+matrix does not exercise native macOS or Windows installation.
 
 | Platform | Status | Sandbox backend | Notes |
 |---|---|---|---|
 | Linux (glibc), x86_64/arm64 | Full | Landlock (5.13+) or bubblewrap fallback | Primary target platform. |
-| Linux (musl, e.g. Alpine), x86_64/arm64 | Full | Landlock or bubblewrap, kernel-dependent | Tested in CI (`alpine:3.20`). |
-| macOS 13+ | Full | `sandbox-exec`/Seatbelt | Apple marks `sandbox-exec` deprecated; it still ships and enforces. |
+| Linux (musl, e.g. Alpine), x86_64/arm64 | Full | Landlock or bubblewrap, kernel-dependent | Requires a compatible Python and sandbox backend. |
+| macOS 13+ | Full | `sandbox-exec`/Seatbelt | Requires `sandbox-exec` to be available on the host. |
 | Windows 10/11 | Supported with limitations | None | See [WINDOWS.md](WINDOWS.md). |
 
-Linux distributions smoke-tested in CI install jobs: Debian (bookworm),
-Ubuntu (24.04), Fedora (40), Alpine (3.20), Arch, openSUSE Tumbleweed — each
-tested with a non-root `alice` account doing the actual install, the same
-way a real deployment should.
+For local end-to-end checks, the [install smoke harness](../scripts/install-smoke.sh)
+uses an isolated configuration directory and checks health and MCP initialization.
 
 ## What differs per platform
 
