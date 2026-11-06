@@ -1258,6 +1258,8 @@ def start_gateway(cfg: Path, ident: Any, port: int, args: argparse.Namespace, re
         report.step("v3 cloudflared stopped", True, "the gateway now manages the tunnel (cloudflared.pid)")
     svc = service_manager(cfg, ident, port)
     want_unit = not (args.no_service or args.no_autostart)
+    if not want_unit:
+        atomic_write(svc.standalone_path, "pidfile\n")
     if want_unit and svc.detect() != "none":
         res = svc.install_unit(svc.python(), cfg, port, {})
         report.step("service", res.get("ok"), f"{res.get('manager')}: {res.get('path')} {res.get('detail') or ''}".strip(),

@@ -6,14 +6,17 @@ keywords: [mcp installer, linux, macos, windows, python]
 
 # Install Loopback
 
-Use the current source checkout. Install as the account that should run Loopback.
+Choose a published release or the current source checkout. Install as the account that should run Loopback.
 Start with local ingress and verify the gateway before enabling a tunnel.
 
-> [!IMPORTANT]
-> The current runtime is on `main`. The older GitHub release does not contain
-> the current installer assets, and `loopback-mcp` is unavailable on the public
-> npm registry. The release and npm installers in this repo are packaging
-> options for a future published distribution.
+## Install a published release
+
+Download the installer for your OS from [GitHub Releases](https://github.com/p5n-n3t/loopback/releases/latest).
+Review it before running `bash install.sh --non-interactive --ingress local`
+or `.\install.ps1 --non-interactive --ingress local` in PowerShell. The
+installer downloads the release archive over HTTPS and checks it against
+`SHA256SUMS` before extraction. Set `LOOPBACK_VERSION` to a tag such as
+`v4.0.1` to pin a release. The public npm package is currently unavailable.
 
 ## Linux and macOS
 
@@ -60,8 +63,8 @@ it):
 | `--host`, `--port` | Override the listen address. |
 | `--tailscale-mode {serve,funnel}` | See [TAILSCALE.md](TAILSCALE.md). |
 | `--cloudflare-token-file`, `--cloudflare-tunnel-id` | See [CLOUDFLARE.md](CLOUDFLARE.md). |
-| `--no-service` | Don't register a systemd/launchd/Task Scheduler unit. |
-| `--no-autostart` | Install the service but don't enable it at boot/login. |
+| `--no-service` | Use PID-file supervision for this config directory. To run alongside another gateway, also set a separate config directory, launcher directory, and port. |
+| `--no-autostart` | Alias for `--no-service`. |
 | `--source <dir>` | Install from a local checkout rather than the packaged release. |
 | `--yes` / `-y` | Assume yes on confirmation prompts. |
 | `--allow-root` | Permit running the installer as root (not recommended; Loopback is meant to run as your own account). |

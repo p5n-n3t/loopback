@@ -1,27 +1,63 @@
 # Web-client capabilities and local CLI boundaries
 
-Reviewed 28 October 2026. This is an integration investigation, not a successful browser-client acceptance record.
-The active Lightsprint session reaches the owner's desktop through Loopback with Landlock enforcement.
-That connection does not prove a fresh ChatGPT, Claude, or Perplexity registration succeeds.
+Plan eligibility reviewed 6 November 2026 against provider documentation.
+Actual connector access depends on your client, workspace, and rollout.
 
 ## Client and account constraints
 
 | Client | Official documentation checked | Consequence |
 | --- | --- | --- |
-| ChatGPT | Current Help documentation describes custom MCP connections, authentication, tool discovery, permissions, and write-action confirmations. The current page names Business and Enterprise/Edu availability. | Do not promise universal Free/Plus eligibility. Check the actual account's available controls and permissions. Loopback cannot grant a missing product entitlement. |
-| Claude | Remote custom connectors are documented for Free, Pro, Max, Team, and Enterprise. Free accounts have one custom connector. Remote requests originate from Anthropic infrastructure. | A private tailnet-only route is insufficient unless that infrastructure can reach it. Check organization permissions and use the supported authentication flow. |
+| ChatGPT Web | The Plugins directory is available across plans. OpenAI documents **Add custom MCP server** in Plugins, and separately documents plan restrictions for developer mode. | Check the actual account and the intended Chat or Work surface. Seeing the add option, completing OAuth, and successfully invoking a tool are separate checks. |
+| Claude | Anthropic documents remote custom connectors on Free, Pro, Max, Ultra, Team, and Enterprise. Free includes one custom connector. | Anthropic must be able to reach the remote endpoint. Team and Enterprise may require an authorized admin. |
 | Perplexity | Official MCP documentation describes external connectors on Pro, Max, and Enterprise and distinguishes client-side MCP from its own provider tools. | Do not promise universal free-account support or assume every client imports the same server primitives. Verify the actual product surface. |
+| VS Code or your own MCP client | VS Code supports configured HTTP MCP servers. A compatible local MCP client can connect directly over localhost. | The model or agent used by that client has its own plan, limits, and permissions. |
 
 Sources:
 
 - [OpenAI custom MCP connections](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt)
+- [OpenAI Plugins availability](https://help.openai.com/en/articles/20001256-plugins-in-chatgpt) and [custom MCP setup](https://developers.openai.com/plugins/quickstart)
 - [Claude remote custom connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
+- [VS Code MCP servers](https://code.visualstudio.com/docs/agent-customization/mcp-servers)
 - [Perplexity MCP tools and client behavior](https://www.perplexity.ai/en-GB/hub/blog/mcp-tools)
 
 Product entitlements and labels can change. The exact accounts and fresh browser sign-ins remain acceptance items.
 MCP tools do not automatically install every provider's native skills, plugins, local files, or UI extensions.
 The client decides which MCP tools, resources, prompts, and attachments it supports.
 Use Loopback's existing packaged skills where the client accepts them. Do not imply an automatic cross-provider skills transfer.
+
+## ChatGPT Web vs. Codex CLI
+
+On an account that supports the required custom MCP actions, a normal
+ChatGPT Web conversation can ask Loopback to inspect a project, run its
+tests, or edit authorized files. This covers parts of a coding workflow.
+ChatGPT Web still provides the model picker, thinking controls, tool
+approvals, and usage limits. Codex CLI has its own execution environment,
+model and reasoning controls, and allowances.
+
+The **Add custom MCP server** entry is a documented feature of the Plugins
+interface. OpenAI's quickstart demonstrates a read-only tool in **Work**.
+If the entry appears on your Free account, confirm authorization and try a
+read-only call in ordinary **Chat** before relying on that workflow. We have
+not verified full Loopback tool access in ordinary Chat on all plans.
+
+OpenAI documents unlimited everyday text chat for Free and Go subject to
+abuse safeguards. Tools have separate limits, and custom MCP access is a
+separate entitlement. Loopback connects through the provider's supported
+interface and does not convert a chat allowance into a tool or Codex quota.
+See [OpenAI's MCP availability](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt).
+
+As documented on 6 November 2026, Free and Go use GPT-5.6 Luna, including
+Think where available. Plus offers Medium and High thinking in Chat and
+GPT-6 Sol as the rollout reaches eligible accounts. Eligible Pro accounts
+also have Extra High and Pro options, subject to usage limits. GPT-6.1 Sol
+is listed separately for Work and Codex. Check
+[OpenAI's current model and usage guide](https://help.openai.com/en/articles/20001354-gpt-6-and-other-models-in-chatgpt)
+for changes to those controls.
+
+Use only systems you own or are authorized to manage. Review the permissions
+and operations you approve, and follow the provider's terms, including limits
+and safety controls. Loopback is supplied as-is under the
+[MIT license](../LICENSE). See [OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/).
 
 ## What Loopback can provide
 
@@ -45,9 +81,8 @@ Keep credential and private-key directories protected.
 
 ## Diagnose the reported intermittent refusal
 
-The owner reports refusals in roughly 5% of ChatGPT tasks. No exact failed prompt or redacted response is available.
-The frequency is an owner estimate. No evidence attributes it to a particular Loopback permission or model behavior.
-Do not remove scopes, approvals, or sandbox rules to suppress an unexplained refusal.
+Start with [Execution traces](EXECUTION-TRACES.md) to identify the last recorded stage.
+A refusal before dispatch may have no gateway receipt.
 
 Use this classification for a reproducible case:
 

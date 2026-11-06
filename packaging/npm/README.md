@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > This is the npm wrapper source. The public package is currently unavailable.
 > For a working install, use the [source checkout instructions](https://github.com/p5n-n3t/loopback/blob/main/docs/INSTALL.md).
-> The commands below describe usage when a matching package and release are published.
+> The commands below describe usage when the npm package is published.
 
 
 Installer and launcher for [Loopback](https://github.com/p5n-n3t/loopback), a

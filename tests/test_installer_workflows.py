@@ -52,6 +52,27 @@ class InstallerTests(unittest.TestCase):
         self.addCleanup(patch.stop)
         self.ctx = build_context(start_managers=False)
 
+    def test_no_service_install_and_later_stop_ignore_an_existing_unit(self):
+        from service import ServiceManager
+
+        unit = self.root / "existing.service"
+        unit.write_text("[Service]\nType=simple\n")
+        args = cli.build_parser().parse_args(["install", "--no-service"])
+        with mock.patch.object(ServiceManager, "detect", return_value="systemd-user"), \
+                mock.patch.object(ServiceManager, "unit_path", new_callable=mock.PropertyMock, return_value=unit), \
+                mock.patch.object(ServiceManager, "_start_pidfile", return_value={"ok": True}) as start, \
+                mock.patch.object(ServiceManager, "_stop_pidfile") as stop, \
+                mock.patch("service._run") as control:
+            cli.start_gateway(self.root, self.ctx.identity, 29206, args, cli.Report("test", None))
+            subsequent = ServiceManager(self.ctx.identity, self.root, 29206)
+            self.assertEqual(subsequent.effective_manager(), "none")
+            subsequent.stop()
+            subsequent.uninstall_unit()
+        start.assert_called_once()
+        self.assertEqual(stop.call_count, 3)
+        control.assert_not_called()
+        self.assertTrue(unit.exists())
+
     def install(self, extra=()):
         args = cli.build_parser().parse_args(['install', '--stage2', '--ingress', 'local', '--yes', *extra])
         out = io.StringIO()

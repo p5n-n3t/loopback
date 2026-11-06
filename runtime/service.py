@@ -153,6 +153,7 @@ class ServiceManager:
             self.uid = os.getuid()
         self.username = getattr(identity, "username", "") or ""
         self.pid_path = self.cfg_dir / "server.pid"
+        self.standalone_path = self.cfg_dir / "standalone"
         self.log_path = self.cfg_dir / "server.log"
         self.unit_backup_dir = self.cfg_dir / "backups" / "units"
         self._manager: str | None = None
@@ -219,6 +220,8 @@ class ServiceManager:
 
     def legacy_unit(self) -> bool:
         """True when the installed systemd unit is the v3 Type=oneshot wrapper."""
+        if self.standalone_path.exists():
+            return False
         try:
             text = self.unit_path.read_text(encoding="utf-8")
         except OSError:
@@ -226,6 +229,8 @@ class ServiceManager:
         return "Type=oneshot" in text and "loopback up" in text
 
     def installed(self) -> bool:
+        if self.standalone_path.exists():
+            return False
         manager = self.detect()
         if manager == "systemd-user":
             return self.unit_path.exists() and not self.legacy_unit()
@@ -356,6 +361,8 @@ WantedBy=default.target
             enable = _run(["systemctl", "--user", "enable", UNIT_NAME])
             restart = _run(["systemctl", "--user", "restart", UNIT_NAME], timeout=60)
             out["ok"] = reload.returncode == 0 and enable.returncode == 0 and restart.returncode == 0
+            if out["ok"]:
+                self.standalone_path.unlink(missing_ok=True)
             out["detail"] = (restart.stderr or enable.stderr or reload.stderr or "").strip()[:500]
             out["linger"] = self.enable_linger()
             return out
@@ -371,6 +378,8 @@ WantedBy=default.target
             if res.returncode != 0:  # older macOS
                 res = _run(["launchctl", "load", "-w", str(self.plist_path)])
             out["ok"] = res.returncode == 0
+            if out["ok"]:
+                self.standalone_path.unlink(missing_ok=True)
             out["detail"] = (res.stderr or "").strip()[:500]
             return out
         # Windows Task Scheduler: the task runs "pythonw cli.py serve", which sets
@@ -390,6 +399,8 @@ WantedBy=default.target
             return out
         run = _run(["schtasks", "/Run", "/TN", WINDOWS_TASK])
         out["ok"] = run.returncode == 0
+        if out["ok"]:
+            self.standalone_path.unlink(missing_ok=True)
         out["detail"] = (run.stderr or "").strip()[:500]
         return out
 
@@ -408,6 +419,9 @@ WantedBy=default.target
 
     def uninstall_unit(self) -> dict[str, Any]:
         """Stop and remove the supervisor definition (keeps a backup copy)."""
+        if self.standalone_path.exists():
+            self._stop_pidfile()
+            return {"ok": True, "manager": "none", "backup": None}
         manager = self.detect()
         out: dict[str, Any] = {"ok": True, "manager": manager, "backup": None}
         if manager == "systemd-user":

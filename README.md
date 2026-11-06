@@ -14,7 +14,7 @@ Give an MCP client scoped access to files, shell commands, jobs, terminals, and 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](docs/PLATFORMS.md)
 [![MIT license](https://img.shields.io/badge/license-MIT-2da44e?style=flat-square)](LICENSE)
 
-[Install](#install) · [Connect a client](#connect-a-client) · [Supported platforms](#supported-platforms) · [Documentation](docs/README.md)
+[Install](#install) · [Connect a client](#connect-a-client) · [Supported platforms](#supported-platforms) · [Documentation](docs/README.md) · [Download the release](https://github.com/p5n-n3t/loopback/releases/latest)
 
 ## What you can do
 
@@ -28,7 +28,7 @@ Give an MCP client scoped access to files, shell commands, jobs, terminals, and 
 
 ## Install
 
-Install on the machine the client should access. Use a regular user account and start with local ingress. The commands below install the current source checkout. See [installation details](docs/INSTALL.md) for prerequisites, noninteractive options, and distribution status.
+Install on the machine the client should access. Use a regular user account and start with local ingress. Use the [GitHub release assets](https://github.com/p5n-n3t/loopback/releases/latest) for a versioned download, or follow the checkout commands below. See [installation details](docs/INSTALL.md) for prerequisites, noninteractive options, and distribution status.
 
 ### Linux and macOS
 
@@ -71,6 +71,34 @@ Use the URL printed by `loopback url` as the MCP server URL. The local default i
 3. Start with a read-only tool such as `machine_info`, then check its receipt in **Execution traces**.
 
 For a hosted client, configure HTTPS ingress reachable from that client. Loopback records calls that reach the authenticated gateway. A hosted client can reject an action before dispatch, in which case there may be no gateway receipt. See [web agent setup](docs/WEB-AGENTS.md) and [client capabilities](docs/CLIENT-CAPABILITIES.md).
+
+### Ask in plain English
+
+Once connected, tell the client what you want done in ordinary language.
+Mention the machine, the folder or resource, and the limits of the task.
+
+- “Using Loopback on the local machine, summarize the README in my project folder. Read only.”
+- “On my registered build server, check available disk space and show the three fullest filesystems. Do not change anything.”
+- “Check the status of the last Git commit in my project, then show the exit status and any Loopback receipt returned by the call.”
+
+Loopback does not require a subscription. The chat or IDE still needs support
+for custom MCP servers. **Claude Free** includes one remote custom connector.
+In **ChatGPT Web**, check whether your account can add a custom MCP server
+under Plugins and use it in the intended conversation. The Plugins directory
+is available across plans, while a specific connector's tools depend on the
+account and conversation surface. See [client and account requirements](docs/CLIENT-CAPABILITIES.md).
+
+### Use responsibly
+
+An eligible web chat can use Loopback for coding tasks such as reading a
+checkout, running tests, and applying authorized edits. The web client still
+chooses the available models, thinking levels, tools, and approval flow.
+Everyday chat allowances do not grant unlimited tool runs or Codex usage.
+Use supported connection methods and respect provider limits and safety controls.
+Only connect machines and accounts you are authorized to operate. You are
+responsible for the access you grant and the actions you approve. Loopback is
+provided as-is under the [MIT license](LICENSE). See
+[ChatGPT Web vs. Codex CLI](docs/CLIENT-CAPABILITIES.md#chatgpt-web-vs-codex-cli).
 
 ## Supported platforms
 
