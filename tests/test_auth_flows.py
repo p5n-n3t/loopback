@@ -66,6 +66,24 @@ class OAuthFlowTests(unittest.TestCase):
         return reg, tok
 
     # ------------------------------------------------------------------ tests
+    def test_mcp_host_and_origin_follow_dashboard_ingress_changes(self):
+        host = "fixture.ngrok.app"
+        origin = f"https://{host}"
+        cfg = self.server.CTX.config
+        previous = cfg.data["ingress"]["ngrok"].copy()
+        token, _ = self.server.AUTH.create_api_token(
+            "ngrok-test", ["loopback:read"], ttl_seconds=60, created_by="tests")
+        headers = {"Authorization": "Bearer " + token, "Host": host, "Origin": origin}
+        self.assertEqual(rpc(self.c, headers, "tools/list").status_code, 421)
+        try:
+            cfg.save({"ingress": {"ngrok": {"enabled": True, "hostname": host, "config_file": "/fixture/ngrok.yml"}}})
+            result = rpc(self.c, headers, "tools/list")
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.headers["access-control-allow-origin"], origin)
+        finally:
+            cfg.save({"ingress": {"ngrok": previous}})
+        self.assertEqual(rpc(self.c, headers, "tools/list").status_code, 421)
+
     def test_metadata_documents(self):
         prm = self.c.get("/.well-known/oauth-protected-resource/mcp").json()
         self.assertEqual(prm["resource"], RESOURCE)

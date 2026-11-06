@@ -1307,23 +1307,31 @@ def _allowed_origins() -> list[str]:
     return list(dict.fromkeys(origins))
 
 
-security = TransportSecuritySettings(
-    enable_dns_rebinding_protection=True,
-    allowed_hosts=[*(h for host in CTX.config.public_hosts() for h in (host, f"{host}:*")), "127.0.0.1:*", "localhost:*", "[::1]:*"],
-    allowed_origins=[*_allowed_origins(), "http://127.0.0.1:*", "http://localhost:*", *(f"https://{h}:*" for h in CTX.config.public_hosts())],
-)
-
+security = TransportSecuritySettings(enable_dns_rebinding_protection=True)
 inner = mcp.streamable_http_app(transport_security=security, stateless_http=True, json_response=True)
 
-mcp_chain = TokenGate(
-    CORSMiddleware(
-        McpGate(inner),
-        allow_origins=_allowed_origins(),
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["*"],
+
+async def mcp_transport(scope, receive, send):
+    # Ingress changes are applied in the dashboard without restarting MCP.
+    hosts = CTX.config.public_hosts()
+    origins = _allowed_origins()
+    security.allowed_hosts = [
+        *(value for host in hosts for value in (host, f"{host}:*")),
+        "127.0.0.1:*", "localhost:*", "[::1]:*",
+    ]
+    security.allowed_origins = [
+        *origins, "http://127.0.0.1:*", "http://localhost:*",
+        *(f"https://{host}:*" for host in hosts),
+    ]
+    cors = CORSMiddleware(
+        McpGate(inner), allow_origins=origins,
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"], allow_headers=["*"],
         expose_headers=["Mcp-Session-Id", "WWW-Authenticate", "X-Loopback-Receipt", "X-Loopback-Trace"],
     )
-)
+    await cors(scope, receive, send)
+
+
+mcp_chain = TokenGate(mcp_transport)
 
 
 async def healthz(request: Request) -> Response:

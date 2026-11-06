@@ -9,12 +9,15 @@ provider trust, and a local agent process. Limits depend on the account and plan
 | --- | --- | --- | --- |
 | Named Cloudflare Tunnel | Persistent configured hostname. Existing Loopback support remains available. | cloudflared plus account, tunnel credentials, and hostname routing. | Keep the existing managed path. |
 | Cloudflare Quick Tunnel | Official docs explicitly exclude SSE. Hostname changes on each launch. Loopback's streamable MCP can return SSE. | No account or domain required, but temporary relay and process. | Do not offer it as a supported MCP provider. |
-| ngrok | Explicit HTTPS URL and HTTP forwarding. OpenAI documents ngrok for Streamable HTTP MCP. Use an account-assigned or reserved domain. | Official agent, account credential file, one process. No purchased domain required for an ngrok hostname. | Add managed support with a fixed hostname. Live authenticated MCP testing remains necessary. |
+| ngrok | Explicit HTTPS URL and HTTP forwarding. Use an account-assigned or reserved domain. | Official agent, account credential file, one process. No purchased domain required for an ngrok hostname. | Managed ingress is implemented. Verify the public route and an authenticated MCP call with your account. |
 | Localtunnel | Official client accepts a requested subdomain, but says the assigned name depends on availability. | Node.js client, public relay or a separately operated server. | No managed integration. The public service does not guarantee the persisted OAuth origin. This is not a claim that HTTP streaming cannot work. |
 | Tunnelto | Official site offers reserved domains. Reviewed documentation does not establish Loopback MCP/SSE behavior. | Rust client and hosted account for reserved domains, or separately operated server. | Defer managed support until streaming, auth headers, cancellation, and stable-origin behavior pass an end-to-end test. Do not call it incompatible. |
 | Tailscale Serve / Funnel | Existing fixed tailnet hostname. Serve is private to the tailnet. Funnel is public. | Existing Tailscale daemon and configuration. | Preserve existing behavior and refuse to replace another application's handler. |
 
 ## Configure ngrok
+
+Use this procedure to publish Loopback itself. To inventory routes from a
+separate ngrok agent you already run, see [ngrok route discovery](NGROK-DISCOVERY.md).
 
 Install the official ngrok agent yourself and create a **version 3** configuration
 file with your account authtoken. Use ngrok's credential setup flow outside the
@@ -43,6 +46,9 @@ The agent starts without claiming remote readiness. The dashboard can check
 `/healthz`, but a health response does not prove OAuth or MCP transport works.
 After configuration, connect an MCP client to `https://HOST/mcp` and complete
 OAuth before relying on the route. Keep the hostname unchanged across restarts.
+Start with a read-only call such as `machine_info` and confirm it appears in
+**Execution traces**. Use the same endpoint URL for the OAuth resource and
+the MCP connection.
 
 A failed apply restores the previous ngrok configuration and attempts to restore
 its previous owned process. If the restored agent cannot start, status reports
