@@ -5,7 +5,7 @@ installing or running Loopback yourself.
 
 ## Before tagging
 
-Versions must agree across four places, enforced by CI:
+Check that the version agrees across four places:
 
 ```bash
 python3 scripts/check_versions.py
@@ -18,66 +18,32 @@ python3 scripts/check_versions.py --expect 4.0.1   # also check against a tag
 - a `## <version>` heading at the top of `CHANGELOG.md`
 
 Add the new version's `## X.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`
-before tagging — the release workflow extracts release notes directly from
-it (a regex anchored on that heading), so a missing or mismatched heading
-produces an empty or failed release description.
+before tagging so it can be used as the release notes.
 
-## CI gates
+## Build, verify, and publish
 
-`.github/workflows/ci.yml` runs on every push/PR:
+The current CI workflow runs compile checks, Bash syntax checks, unit tests,
+and a plugin-package smoke check on Ubuntu with Python 3.11 and 3.13. Wait
+for CI on the exact commit you intend to release. Native macOS and Windows
+install tests are separate from this CI matrix.
 
-- **test** — `python -m compileall runtime` and the full unittest suite on
-  Linux/macOS/Windows × Python 3.11/3.13.
-- **lint** — ruff, bandit (medium+ severity), `pip-audit --strict`,
-  shellcheck on the shell installers/scripts, a Node syntax check on the
-  dashboard JS and the npm wrapper, `check_versions.py`, a grep for
-  maintainer-leaked strings across the whole tree, and
-  `scripts/check_skills.py`.
-- **powershell** — parses `install.ps1`/`bin/loopback.ps1` with
-  PowerShell's own parser.
-- **install-linux-distros** — a real install (as a non-root `alice`
-  account) on Debian, Ubuntu, Fedora, Alpine, Arch, and openSUSE
-  Tumbleweed.
-- **install-macos**, **install-windows** — smoke install + `doctor`.
-
-A tag push only triggers the release workflow — it does not re-run or
-depend on CI passing on the tag commit itself, so **tag only a commit whose
-CI run on its branch was green.**
-
-## Tagging and the release workflow
+From a clean checkout of that commit:
 
 ```bash
-git tag v4.0.1
-git push origin v4.0.1
+python3 scripts/check_versions.py --expect 4.0.1
+bash scripts/make-release.sh
+(cd dist && sha256sum -c SHA256SUMS)
 ```
 
-`.github/workflows/release.yml`:
+Smoke-test the archive with a separate config directory, launcher directory,
+and listener port. The release assets are the tarball, checksum manifest,
+Bash installer, and PowerShell installer. Publish them together using
+`gh release create`, with `--target` set to the tested commit and a
+`--notes-file` containing the changelog for that version.
 
-1. **verify** — `check_versions.py --expect <tag version>`, then installs
-   dependencies and runs the full test suite again against the tagged
-   commit specifically.
-2. **release** (needs verify) — `scripts/make-release.sh` builds the
-   release tarball and `SHA256SUMS`, copies `install.sh`/`install.ps1` into
-   `dist/` and appends their checksums to `SHA256SUMS`, extracts this
-   version's notes out of `CHANGELOG.md`, and publishes a GitHub release
-   (marked prerelease automatically if the tag contains a `-`, e.g.
-   `v4.1.0-rc1`) attaching the tarball, `SHA256SUMS`, `install.sh`, and
-   `install.ps1`.
-3. Finally, **only on a non-prerelease tag**, and only if the `NPM_TOKEN`
-   secret is configured, `npm publish --access public --provenance`
-   publishes the npm wrapper package. If `NPM_TOKEN` isn't configured, this
-   step prints a message and exits cleanly rather than failing the release
-   — the GitHub release with tarball and checksums is still considered a
-   complete release either way.
-
-## Why this is safe to install unattended
-
-The npm wrapper (`npx loopback-mcp install`) and `install.sh`/`install.ps1`
-only ever fetch the tarball and `SHA256SUMS` over HTTPS, **verify the
-SHA-256 before extracting anything**, and extract with the system `tar` —
-there is no execution of unverified downloaded content at any point in that
-chain. See [packaging/npm/README.md](../packaging/npm/README.md) for the
-wrapper's own documentation of this.
+The release installers fetch and verify the archive before extraction.
+Review the standalone installer itself before running it. npm publication
+is a separate distribution step.
 
 ## See also
 

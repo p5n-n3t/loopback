@@ -1,6 +1,6 @@
 [project]
 name = "loopback-mcp"
-version = "4.0.0"
+version = "4.0.1"
 description = "Self-hostable MCP control plane for computers and servers: OAuth 2.1, sandboxed shell, fleet, dashboard."
 readme = "README.md"
 requires-python = ">=3.11"

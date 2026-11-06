@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.0.1 — 2026-11-06
+
+- Discover hosts and explicitly exposed MCP endpoints across the fleet, with Cloudflare inventory and opt-in ngrok discovery.
+- Inspect SSH receipts and execution traces in the dashboard, including policy decisions, dispatch, and redacted exports.
+- Rotate OAuth refresh tokens atomically and clean up local SSH processes after cancellation.
+- Keep installs made with `--no-service` on PID-file supervision so they can coexist with a managed gateway.
+- Add current install guides, account eligibility notes, and plain-language prompts.
+
 ## 4.0.0 — 2026-10-22
 
 Loopback becomes a full self-hostable MCP control plane: a proper OAuth 2.1
